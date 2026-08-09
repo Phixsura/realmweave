@@ -1,0 +1,24 @@
+[package]
+name = "realmweave-client"
+description = "Realmweave native game client (Bevy): 3D realms + 2D analysis view"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+realmweave-core = { workspace = true }
+realmweave-protocol = { workspace = true }
+realmweave-supplywar = { path = "../realmweave-supplywar" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+bevy = "0.15"
+bevy_egui = "0.31"
+crossbeam-channel = "0.5"
+tungstenite = "0.26"
+steamworks = { version = "0.11", optional = true }
+
+[features]
+# Steam integration (requires the Steamworks SDK at runtime; the client runs
+# fine without it). Enable with: cargo build -p realmweave-client --features steam
+steam = ["dep:steamworks"]
