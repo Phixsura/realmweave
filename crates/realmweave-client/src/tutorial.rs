@@ -2,7 +2,25 @@
 //! whose progression is driven by the actual game state — the player learns
 //! by doing, not by reading.
 
-use realmweave_core::{Game, Move, Player, Realm};
+use realmweave_core::{Game, Move, NodeId, Player, Realm};
+
+/// Board-level guidance for the current step: nodes and edges to pulse.
+#[derive(Default)]
+pub struct Hints {
+    pub nodes: Vec<NodeId>,
+    pub edges: Vec<u32>,
+}
+
+/// How the tutorial bot should behave at this step.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum BotMode {
+    /// Reading step: the AI waits for you.
+    Paused,
+    /// Teaching steps: plays simple placements only, never cuts.
+    Gentle,
+    /// Final step: the real bot.
+    Full,
+}
 
 /// Which tutorial step is active. Steps auto-advance when the game state
 /// satisfies their goal; a few are read-only and advance by button.
@@ -197,6 +215,79 @@ impl TutorialState {
                 Some("返回菜单"),
             ),
         }
+    }
+
+    /// Bot behavior for the current step.
+    pub fn bot_mode(&self) -> BotMode {
+        match self.step {
+            Step::Welcome | Step::Lifeline | Step::Done => BotMode::Paused,
+            Step::FirstStone | Step::CrossRealm | Step::UseScissors => BotMode::Gentle,
+            Step::FinishGame => BotMode::Full,
+        }
+    }
+
+    /// What to pulse on the board right now.
+    pub fn hints(&self, game: &Game) -> Hints {
+        let mut h = Hints::default();
+        let bd = game.board();
+        let st = game.state();
+        match self.step {
+            Step::Welcome => {
+                // show your origins
+                h.nodes = bd.definition().origins_of(self.human);
+            }
+            Step::FirstStone => {
+                // empties adjacent to your origins
+                for &o in &bd.definition().origins_of(self.human) {
+                    h.nodes.push(o);
+                    for nb in bd.live_neighbors(o, &st.cut_edges) {
+                        if st.occupant(nb).is_none() {
+                            h.nodes.push(nb);
+                        }
+                    }
+                }
+            }
+            Step::CrossRealm => {
+                // gate endpoints in realms you haven't reached, plus the
+                // gate columns themselves
+                let mut reached = [false; 3];
+                for (n, occ) in st.occupancy.iter().enumerate() {
+                    if *occ == Some(self.human) {
+                        reached[bd.definition().nodes[n].realm as usize] = true;
+                    }
+                }
+                for (ei, e) in bd.definition().edges.iter().enumerate() {
+                    if e.kind == realmweave_core::EdgeKind::Portal
+                        && !st.cut_edges.contains(&(ei as u32))
+                    {
+                        h.edges.push(ei as u32);
+                        for node in [e.a, e.b] {
+                            let r = bd.definition().nodes[node as usize].realm as usize;
+                            if !reached[r] && st.occupant(node).is_none() {
+                                h.nodes.push(node);
+                            }
+                        }
+                    }
+                }
+            }
+            Step::UseScissors => {
+                // cuttable edges touching an AI stone
+                let opp = self.human.opponent();
+                for (ei, e) in bd.definition().edges.iter().enumerate() {
+                    let ei = ei as u32;
+                    if st.cut_edges.contains(&ei) {
+                        continue;
+                    }
+                    if (st.occupant(e.a) == Some(opp) || st.occupant(e.b) == Some(opp))
+                        && game.validate(&Move::CutEdge(ei)).is_ok()
+                    {
+                        h.edges.push(ei);
+                    }
+                }
+            }
+            Step::Lifeline | Step::FinishGame | Step::Done => {}
+        }
+        h
     }
 
     /// Steps count for the progress display (Done excluded).

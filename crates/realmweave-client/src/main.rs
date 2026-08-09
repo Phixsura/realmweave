@@ -359,6 +359,8 @@ fn sync_board_visuals(
     mut commands: Commands,
     session: Res<GameSession>,
     view: Res<ViewSettings>,
+    tut: Option<Res<Tutorial>>,
+    time: Res<Time>,
     spawned: Option<Res<BoardSpawned>>,
     palette: Option<Res<Palette>>,
     shapes_res: Option<Res<Shapes>>,
@@ -603,6 +605,27 @@ fn sync_board_visuals(
         }
     }
 
+    // Tutorial guidance: pulse suggested nodes and edges.
+    if let Some(tut) = &tut {
+        let hints = tut.0.hints(&session.0.game);
+        let pulse = 0.45 + 0.35 * (time.elapsed_secs() * 3.0).sin();
+        let glow = Color::srgba(0.3, 1.0, 0.55, pulse);
+        for &n in &hints.nodes {
+            let p = Vec3::from_array(layout::node_position(board, n, view.mode));
+            gizmos.sphere(
+                Isometry3d::from_translation(p),
+                0.6 + 0.1 * (time.elapsed_secs() * 3.0).sin(),
+                glow,
+            );
+        }
+        for &e in &hints.edges {
+            let edge = &def.edges[e as usize];
+            let a = Vec3::from_array(layout::node_position(board, edge.a, view.mode));
+            let b = Vec3::from_array(layout::node_position(board, edge.b, view.mode));
+            gizmos.line(a, b, glow);
+        }
+    }
+
     // Cut-mode anchor highlight.
     if let Some(anchor) = view.cut_anchor {
         let p = Vec3::from_array(layout::node_position(board, anchor, view.mode));
@@ -840,7 +863,12 @@ fn auto_reconnect(
 /// Bot turn driver: when control is VsBot and it's the bot's color to move,
 /// compute a move (blocking is fine at this bot's speed: <1s typical) after
 /// a short human-feeling delay.
-fn bot_turn(time: Res<Time>, mut think: Local<f32>, mut session: ResMut<GameSession>) {
+fn bot_turn(
+    time: Res<Time>,
+    mut think: Local<f32>,
+    mut session: ResMut<GameSession>,
+    tut: Option<Res<Tutorial>>,
+) {
     let s = &mut session.0;
     let Control::VsBot(human) = s.control else {
         *think = 0.0;
@@ -850,18 +878,61 @@ fn bot_turn(time: Res<Time>, mut think: Local<f32>, mut session: ResMut<GameSess
         *think = 0.0;
         return;
     }
+    // Tutorial pacing: pause while the player reads; play gently while
+    // they learn the verbs; full strength only in the final step.
+    let mode = tut
+        .map(|t| t.0.bot_mode())
+        .unwrap_or(tutorial::BotMode::Full);
+    if mode == tutorial::BotMode::Paused {
+        *think = 0.0;
+        return;
+    }
     *think += time.delta_secs();
     if *think < 0.6 {
         return; // brief pause so moves feel deliberate
     }
     *think = 0.0;
     let seed = 0xB07 ^ (s.game.state().ply as u64).wrapping_mul(2654435761);
-    if let Some(mv) = realmweave_core::bot::choose_move(&s.game, seed) {
+    let mv = match mode {
+        tutorial::BotMode::Gentle => gentle_bot_move(&s.game, seed),
+        _ => realmweave_core::bot::choose_move(&s.game, seed),
+    };
+    if let Some(mv) = mv {
         let _ = s.game.play(mv);
     } else {
         // no candidate — pass if possible, else resign is never auto-played
         let _ = s.game.play(realmweave_core::Move::Pass);
     }
+}
+
+/// Tutorial sparring: placements only (never cuts), grown from the bot's
+/// own stones/origins so it builds a visible, readable shape — and never
+/// blocks the player's teaching goals aggressively.
+fn gentle_bot_move(game: &Game, seed: u64) -> Option<Move> {
+    let bd = game.board();
+    let st = game.state();
+    let me = game.to_move();
+    let mut anchors: Vec<NodeId> = bd.definition().origins_of(me);
+    for (n, occ) in st.occupancy.iter().enumerate() {
+        if *occ == Some(me) {
+            anchors.push(n as NodeId);
+        }
+    }
+    let mut cands: Vec<NodeId> = Vec::new();
+    for &a in &anchors {
+        for nb in bd.live_neighbors(a, &st.cut_edges) {
+            if st.occupant(nb).is_none() && game.validate(&Move::Place(nb)).is_ok() {
+                cands.push(nb);
+            }
+        }
+    }
+    cands.sort_unstable();
+    cands.dedup();
+    if cands.is_empty() {
+        return realmweave_core::bot::choose_move(game, seed);
+    }
+    let pick = (seed as usize).wrapping_add(st.ply as usize * 7) % cands.len();
+    Some(Move::Place(cands[pick]))
 }
 
 /// Demo auto-play: advance the replay cursor on a timer.
@@ -1486,6 +1557,16 @@ fn tutorial_panel(
             ui.add(egui::ProgressBar::new(idx as f32 / total as f32).desired_height(6.0));
             ui.add_space(8.0);
             ui.label(body);
+            // Live moment-teaching: provisional weave needs to survive a turn.
+            if let Some(p) = game.state().pending_weave {
+                ui.add_space(6.0);
+                let msg = if p == tut.0.human {
+                    "🕸 你的编织已成形！挺过 AI 这一回合就获胜——它会拼命剪。"
+                } else {
+                    "🕸 AI 的编织成形了！这回合你必须剪断它的网，否则它获胜。"
+                };
+                ui.colored_label(egui::Color32::LIGHT_YELLOW, msg);
+            }
             ui.add_space(12.0);
             if let Some(label) = button {
                 if ui.button(egui::RichText::new(label).strong()).clicked() {
