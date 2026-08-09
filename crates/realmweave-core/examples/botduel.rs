@@ -6,14 +6,18 @@ fn main() {
         .nth(1)
         .and_then(|s| s.parse().ok())
         .unwrap_or(4);
+    let size: usize = std::env::args()
+        .nth(2)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(61);
     for g in 0..games {
-        let def = boardgen::generate_standard(61).unwrap();
+        let def = boardgen::generate_standard(size).unwrap();
         let board = BoardGraph::new(def).unwrap();
         let cfg = GameConfig::new(board.definition().id.clone())
             .with_ruleset(realmweave_core::WEAVE_LAYERS_V3);
         let mut game = Game::new(board, cfg).unwrap();
         let mut cuts = 0;
-        while game.result().is_none() && game.state().ply < 600 {
+        while game.result().is_none() && game.state().ply < 700 {
             let seed = 0xD0E1u64
                 .wrapping_add(g as u64 * 0x9E37)
                 .wrapping_add(game.state().ply as u64);

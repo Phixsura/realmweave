@@ -158,7 +158,7 @@ struct UiState {
 impl Default for UiState {
     fn default() -> Self {
         UiState {
-            board_size: 61,
+            board_size: 127,
             pie_rule: false,
             ruleset: realmweave_core::WEAVE_LAYERS_V3.to_string(),
             world_seed: 0,
@@ -260,7 +260,7 @@ fn setup_camera(mut commands: Commands) {
             commands.insert_resource(sw);
             commands.insert_resource(Active);
         } else if v == "duel" {
-            let def = boardgen::generate_standard(61).expect("standard size");
+            let def = boardgen::generate_standard(127).expect("standard size");
             let board = BoardGraph::new(def).expect("valid board");
             let mut session =
                 Session::hotseat_with_rules(board, false, realmweave_core::WEAVE_LAYERS_V3);
@@ -277,7 +277,7 @@ fn setup_camera(mut commands: Commands) {
                 seed: 0xD0E1,
                 next_is_key: false,
                 last_layers: [0, 0],
-                board_size: 61,
+                board_size: 127,
                 ruleset: realmweave_core::WEAVE_LAYERS_V3.to_string(),
             });
         }

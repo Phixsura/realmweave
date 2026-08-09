@@ -48,6 +48,9 @@ pub const LAYER_SCISSORS: u8 = 2;
 pub const SCISSORS_CAP: u8 = 4;
 /// Layers needed to win weave-layers-v3.
 pub const LAYERS_TO_WIN: u8 = 3;
+/// Hard ply cap for weave-layers-v3: at this many moves the game closes
+/// and fallback scoring (layers first) decides. Keeps marathons bounded.
+pub const V3_PLY_CAP: u32 = 500;
 /// Supply range: max number of EMPTY nodes a supply line may cross
 /// (supply-range variant). Stones must advance in linked steps — a stone
 /// flung far from its network starves. This is what forces Go-like
@@ -1040,6 +1043,12 @@ impl RuleSet for WeaveSeverV2 {
             next.pending_weave = Some(mover);
         } else if next.pending_weave == Some(mover) {
             next.pending_weave = None;
+        }
+
+        // 4a. Ply cap (v3): close the game and score it.
+        if self.layers_to_win > 1 && next.ply >= V3_PLY_CAP && next.result.is_none() {
+            next.result = Some(Self::fallback_result(board, &next));
+            return Ok(next);
         }
 
         // 4. Full-board endgame (no response turn possible).
