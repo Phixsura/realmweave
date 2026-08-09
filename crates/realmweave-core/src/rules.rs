@@ -23,6 +23,7 @@ pub const TERRITORY_V1: &str = "three-realms-territory-v1";
 pub const SUPPLY_V1: &str = "three-realms-supply-v1";
 pub const SUPPLY_RANGE_V1: &str = "three-realms-supplyrange-v1";
 pub const WEAVE_SEVER_V2: &str = "weave-sever-v2";
+pub const WEAVE_LAYERS_V3: &str = "weave-layers-v3";
 
 /// Weave bonus added to the largest-network score in the territory variant.
 pub const TERRITORY_WEAVE_BONUS: i32 = 15;
@@ -41,6 +42,12 @@ pub const SUPPLY_WEAVE_BONUS: i32 = 10;
 /// standard boards) — pure-scissor strangling is impossible at K=3;
 /// strangles require stone walls plus surgical cuts.
 pub const SCISSORS: u8 = 3;
+/// Scissors granted to BOTH players when a layer petrifies (v3).
+pub const LAYER_SCISSORS: u8 = 2;
+/// Scissors cap (v3).
+pub const SCISSORS_CAP: u8 = 4;
+/// Layers needed to win weave-layers-v3.
+pub const LAYERS_TO_WIN: u8 = 3;
 /// Supply range: max number of EMPTY nodes a supply line may cross
 /// (supply-range variant). Stones must advance in linked steps — a stone
 /// flung far from its network starves. This is what forces Go-like
@@ -113,7 +120,14 @@ pub fn ruleset_by_id(id: &str, pie_rule: bool) -> Result<Box<dyn RuleSet>, RuleE
         TERRITORY_V1 => Ok(Box::new(WeaveRules::territory(pie_rule))),
         SUPPLY_V1 => Ok(Box::new(WeaveRules::supply(pie_rule))),
         SUPPLY_RANGE_V1 => Ok(Box::new(WeaveRules::supply_range(pie_rule))),
-        WEAVE_SEVER_V2 => Ok(Box::new(WeaveSeverV2 { pie_rule })),
+        WEAVE_SEVER_V2 => Ok(Box::new(WeaveSeverV2 {
+            pie_rule,
+            layers_to_win: 1,
+        })),
+        WEAVE_LAYERS_V3 => Ok(Box::new(WeaveSeverV2 {
+            pie_rule,
+            layers_to_win: LAYERS_TO_WIN,
+        })),
         other => Err(RuleError::UnknownRuleset(other.to_string())),
     }
 }
@@ -582,6 +596,10 @@ pub fn territory_score(board: &BoardGraph, state: &GameState, player: Player) ->
 /// most potentially-connectable origins, then most scissors, then draw.
 pub struct WeaveSeverV2 {
     pub pie_rule: bool,
+    /// 1 = classic v2 (first confirmed weave wins). >1 = weave-layers-v3:
+    /// each confirmed weave scores a layer and petrifies its network; first
+    /// to this many layers wins.
+    pub layers_to_win: u8,
 }
 
 impl WeaveSeverV2 {
@@ -589,8 +607,52 @@ impl WeaveSeverV2 {
         self.pie_rule && !state.swap_used && state.ply == 1 && state.to_move == Player::Dark
     }
 
+    /// Sanctum radius for this mode: wider on larger boards; a radius-2
+    /// halo would swallow most of tiny hex19.
+    fn sanctum_radius(&self, board: &BoardGraph) -> u32 {
+        if self.layers_to_win > 1 && board.node_count() >= 37 * 3 {
+            2
+        } else {
+            1
+        }
+    }
+
+    /// Nodes within graph distance `radius` of any origin (any player).
+    fn origin_zone(board: &BoardGraph, radius: u32) -> Vec<bool> {
+        let def = board.definition();
+        let mut zone = vec![false; board.node_count()];
+        let mut queue = VecDeque::new();
+        let mut dist = vec![u32::MAX; board.node_count()];
+        for o in &def.origins {
+            dist[o.node as usize] = 0;
+            queue.push_back(o.node);
+        }
+        while let Some(cur) = queue.pop_front() {
+            if dist[cur as usize] >= radius {
+                continue;
+            }
+            for &nb in board.neighbors(cur) {
+                if dist[nb as usize] == u32::MAX {
+                    dist[nb as usize] = dist[cur as usize] + 1;
+                    queue.push_back(nb);
+                }
+            }
+        }
+        for (n, d) in dist.iter().enumerate() {
+            if *d <= radius {
+                zone[n] = true;
+            }
+        }
+        zone
+    }
+
     /// Can edge `e` be cut at all (regardless of whose turn)?
-    fn edge_cuttable(board: &BoardGraph, state: &GameState, e: u32) -> Result<(), RuleError> {
+    fn edge_cuttable(
+        &self,
+        board: &BoardGraph,
+        state: &GameState,
+        e: u32,
+    ) -> Result<(), RuleError> {
         let def = board.definition();
         let Some(edge) = def.edges.get(e as usize) else {
             return Err(RuleError::CannotCut(e));
@@ -598,20 +660,126 @@ impl WeaveSeverV2 {
         if state.cut_edges.contains(&e) {
             return Err(RuleError::CannotCut(e));
         }
-        // Origin-adjacent edges (either player's) are protected.
-        let is_origin = |n: NodeId| def.origins.iter().any(|o| o.node == n);
-        if is_origin(edge.a) || is_origin(edge.b) {
+        // Origin-adjacent edges (either player's) are protected. In the
+        // layers game the protected halo widens to radius 1 around every
+        // origin, and PORTAL edges are the world's skeleton — uncuttable.
+        // Gates are fought over by occupation, not demolition; scissors
+        // shape the terrain within realms.
+        if self.layers_to_win > 1 {
+            if edge.kind == crate::board::EdgeKind::Portal {
+                return Err(RuleError::CannotCut(e));
+            }
+            let zone = Self::origin_zone(board, 1);
+            if zone[edge.a as usize] || zone[edge.b as usize] {
+                return Err(RuleError::CannotCut(e));
+            }
+        } else {
+            let is_origin = |n: NodeId| def.origins.iter().any(|o| o.node == n);
+            if is_origin(edge.a) || is_origin(edge.b) {
+                return Err(RuleError::CannotCut(e));
+            }
+        }
+        // Petrified world structure cannot be re-carved (v3).
+        if state.is_petrified(edge.a) || state.is_petrified(edge.b) {
             return Err(RuleError::CannotCut(e));
         }
         Ok(())
     }
 
-    fn board_full(state: &GameState) -> bool {
-        state.occupancy.iter().all(|occ| occ.is_some())
+    /// v3: petrify `player`'s weave network. The network = the connected
+    /// component (over live edges, own stones + origins) containing the
+    /// origins. Origin-adjacent stones are REMOVED instead of petrified —
+    /// origins must keep breathing room (design §1.2).
+    fn petrify_weave(board: &BoardGraph, state: &mut GameState, player: Player) {
+        let def = board.definition();
+        let origins = def.origins_of(player);
+        // Collect the network via BFS over own stones from the origins.
+        let mut in_net = vec![false; board.node_count()];
+        let mut queue = VecDeque::new();
+        for &o in &origins {
+            if !in_net[o as usize] {
+                in_net[o as usize] = true;
+                queue.push_back(o);
+            }
+        }
+        while let Some(cur) = queue.pop_front() {
+            for nb in board.live_neighbors(cur, &state.cut_edges) {
+                if !in_net[nb as usize] && state.occupant(nb) == Some(player) {
+                    in_net[nb as usize] = true;
+                    queue.push_back(nb);
+                }
+            }
+        }
+        if state.petrified.len() < board.node_count() {
+            state.petrified.resize(board.node_count(), false);
+        }
+        let origin_adjacent: Vec<bool> = {
+            let mut adj = vec![false; board.node_count()];
+            for o in &def.origins {
+                for &nb in board.neighbors(o.node) {
+                    adj[nb as usize] = true;
+                }
+            }
+            adj
+        };
+        let is_origin: Vec<bool> = {
+            let mut v = vec![false; board.node_count()];
+            for o in &def.origins {
+                v[o.node as usize] = true;
+            }
+            v
+        };
+        for n in 0..board.node_count() {
+            if !in_net[n] || is_origin[n] || state.occupant(n as NodeId) != Some(player) {
+                continue; // origins themselves stay origins
+            }
+            state.occupancy[n] = None;
+            if !origin_adjacent[n] {
+                state.petrified[n] = true;
+            }
+            // origin-adjacent: removed entirely (breathing room)
+        }
+        // Layer scissors for both sides, capped.
+        for sc in state.scissors.iter_mut() {
+            *sc = (*sc + LAYER_SCISSORS).min(SCISSORS_CAP);
+        }
     }
 
-    /// Fallback scoring per §2.5 of the design.
+    /// Doom check for this mode: v2 = potential connectivity (stones
+    /// block); v3 = permanent terrain only (cuts + petrification).
+    fn doomed(&self, board: &BoardGraph, state: &GameState, player: Player) -> bool {
+        if self.layers_to_win > 1 {
+            !permanently_connected(board, state, player)
+        } else {
+            !potential_connected(board, state, player)
+        }
+    }
+
+    fn board_full(state: &GameState) -> bool {
+        state
+            .occupancy
+            .iter()
+            .enumerate()
+            .all(|(i, occ)| occ.is_some() || state.is_petrified(i as NodeId))
+    }
+
+    /// Fallback scoring per §2.5 of the design (v3: layers decide first).
     fn fallback_result(board: &BoardGraph, state: &GameState) -> GameResult {
+        match state.layers[0].cmp(&state.layers[1]) {
+            std::cmp::Ordering::Greater => {
+                return GameResult::Win {
+                    player: Player::Light,
+                    reason: WinReason::RealmWeave,
+                }
+            }
+            std::cmp::Ordering::Less => {
+                return GameResult::Win {
+                    player: Player::Dark,
+                    reason: WinReason::RealmWeave,
+                }
+            }
+            std::cmp::Ordering::Equal => {}
+        }
         let l = potential_origin_groups(board, state, Player::Light);
         let d = potential_origin_groups(board, state, Player::Dark);
         match l.cmp(&d) {
@@ -640,7 +808,11 @@ impl WeaveSeverV2 {
 
 impl RuleSet for WeaveSeverV2 {
     fn id(&self) -> &str {
-        WEAVE_SEVER_V2
+        if self.layers_to_win > 1 {
+            WEAVE_LAYERS_V3
+        } else {
+            WEAVE_SEVER_V2
+        }
     }
 
     fn setup(&self, state: &mut GameState) {
@@ -651,23 +823,40 @@ impl RuleSet for WeaveSeverV2 {
         if state.is_finished() {
             return Vec::new();
         }
-        // Origin sanctum: enemy-origin-adjacent nodes are unplaceable.
+        // Origin sanctum: nodes near an ENEMY origin are unplaceable
+        // (radius 1 in v2, radius 2 in the layers game).
         let def = board.definition();
         let enemy = state.to_move.opponent();
+        let radius = self.sanctum_radius(board);
         let mut sanctum = vec![false; board.node_count()];
         for o in def.origins.iter().filter(|o| o.player == enemy) {
-            for &nb in board.neighbors(o.node) {
-                sanctum[nb as usize] = true;
+            let mut dist = vec![u32::MAX; board.node_count()];
+            let mut queue = VecDeque::new();
+            dist[o.node as usize] = 0;
+            queue.push_back(o.node);
+            while let Some(cur) = queue.pop_front() {
+                if dist[cur as usize] >= radius {
+                    continue;
+                }
+                for &nb in board.neighbors(cur) {
+                    if dist[nb as usize] == u32::MAX {
+                        dist[nb as usize] = dist[cur as usize] + 1;
+                        sanctum[nb as usize] = true;
+                        queue.push_back(nb);
+                    }
+                }
             }
         }
         let mut moves: Vec<Move> = (0..board.node_count() as NodeId)
-            .filter(|&n| state.occupant(n).is_none() && !sanctum[n as usize])
+            .filter(|&n| {
+                state.occupant(n).is_none() && !sanctum[n as usize] && !state.is_petrified(n)
+            })
             .map(Move::Place)
             .collect();
         if state.scissors[player_index(state.to_move)] > 0 {
             for e in 0..board.definition().edges.len() as u32 {
-                if Self::edge_cuttable(board, state, e).is_ok()
-                    && !cut_self_strangles(board, state, state.to_move, e)
+                if self.edge_cuttable(board, state, e).is_ok()
+                    && !cut_self_strangles(board, state, state.to_move, e, self.layers_to_win > 1)
                 {
                     moves.push(Move::CutEdge(e));
                 }
@@ -695,22 +884,37 @@ impl RuleSet for WeaveSeverV2 {
                 if *node as usize >= board.node_count() {
                     return Err(RuleError::NoSuchNode(*node));
                 }
-                if state.occupant(*node).is_some() {
+                if state.occupant(*node).is_some() || state.is_petrified(*node) {
                     return Err(RuleError::Occupied(*node));
                 }
-                // Origin sanctum: you may not place adjacent to an ENEMY
-                // origin. Origins are low-degree corner nodes; without this
-                // a 2–3 stone blockade strangles them outright and every
-                // game degenerates into a blockade race. Mirrors the
-                // uncuttable origin edges.
+                // Origin sanctum: you may not place near an ENEMY origin
+                // (radius 1 in v2, radius 2 in the layers game). Origins
+                // are low-degree corner nodes; without this a small
+                // blockade strangles them outright and every game
+                // degenerates into a blockade race.
                 let def = board.definition();
                 let enemy = state.to_move.opponent();
-                let enemy_origin_adj = def
-                    .origins
-                    .iter()
-                    .any(|o| o.player == enemy && board.neighbors(o.node).contains(node));
-                if enemy_origin_adj {
-                    return Err(RuleError::OriginSanctum(*node));
+                let radius = self.sanctum_radius(board);
+                for o in def.origins.iter().filter(|o| o.player == enemy) {
+                    // BFS out to `radius` from the origin.
+                    let mut dist = vec![u32::MAX; board.node_count()];
+                    let mut queue = VecDeque::new();
+                    dist[o.node as usize] = 0;
+                    queue.push_back(o.node);
+                    while let Some(cur) = queue.pop_front() {
+                        if cur == *node && dist[cur as usize] <= radius {
+                            return Err(RuleError::OriginSanctum(*node));
+                        }
+                        if dist[cur as usize] >= radius {
+                            continue;
+                        }
+                        for &nb in board.neighbors(cur) {
+                            if dist[nb as usize] == u32::MAX {
+                                dist[nb as usize] = dist[cur as usize] + 1;
+                                queue.push_back(nb);
+                            }
+                        }
+                    }
                 }
                 Ok(())
             }
@@ -718,8 +922,8 @@ impl RuleSet for WeaveSeverV2 {
                 if state.scissors[player_index(state.to_move)] == 0 {
                     return Err(RuleError::NoScissors);
                 }
-                Self::edge_cuttable(board, state, *e)?;
-                if cut_self_strangles(board, state, state.to_move, *e) {
+                self.edge_cuttable(board, state, *e)?;
+                if cut_self_strangles(board, state, state.to_move, *e, self.layers_to_win > 1) {
                     return Err(RuleError::SelfStrangle);
                 }
                 Ok(())
@@ -785,7 +989,7 @@ impl RuleSet for WeaveSeverV2 {
 
         // 1. Strangle check — death before life (design §2.3, edge case 4).
         //    A cut or a blocking placement may have doomed the opponent.
-        if !potential_connected(board, &next, opp) {
+        if self.doomed(board, &next, opp) {
             next.result = Some(GameResult::Win {
                 player: mover,
                 reason: WinReason::Strangle,
@@ -796,13 +1000,39 @@ impl RuleSet for WeaveSeverV2 {
         // 2. Pending-weave confirmation (opponent's weave survived my turn?).
         if next.pending_weave == Some(opp) {
             if live_realm_weave(board, &next, opp) {
-                next.result = Some(GameResult::Win {
-                    player: opp,
-                    reason: WinReason::RealmWeave,
-                });
-                return Ok(next);
+                next.layers[player_index(opp)] += 1;
+                if next.layers[player_index(opp)] >= self.layers_to_win {
+                    next.result = Some(GameResult::Win {
+                        player: opp,
+                        reason: WinReason::RealmWeave,
+                    });
+                    return Ok(next);
+                }
+                // v3: the confirmed weave petrifies into world structure
+                // and play continues on the transformed board.
+                Self::petrify_weave(board, &mut next, opp);
+                next.pending_weave = None;
+                // Petrification may have doomed someone: strangle checks.
+                // Self-doom by petrify loses (design edge case 2); check
+                // the petrifier FIRST so simultaneous doom favors the
+                // non-scorer per that rule.
+                if self.doomed(board, &next, opp) {
+                    next.result = Some(GameResult::Win {
+                        player: mover,
+                        reason: WinReason::Strangle,
+                    });
+                    return Ok(next);
+                }
+                if self.doomed(board, &next, mover) {
+                    next.result = Some(GameResult::Win {
+                        player: opp,
+                        reason: WinReason::Strangle,
+                    });
+                    return Ok(next);
+                }
+            } else {
+                next.pending_weave = None;
             }
-            next.pending_weave = None;
         }
 
         // 3. New provisional weave by the mover?
@@ -815,13 +1045,17 @@ impl RuleSet for WeaveSeverV2 {
         // 4. Full-board endgame (no response turn possible).
         if Self::board_full(&next) && next.result.is_none() {
             if next.pending_weave == Some(mover) {
-                next.result = Some(GameResult::Win {
+                // A standing weave the opponent can never answer scores.
+                next.layers[player_index(mover)] += 1;
+            }
+            next.result = Some(if next.layers[player_index(mover)] >= self.layers_to_win {
+                GameResult::Win {
                     player: mover,
                     reason: WinReason::RealmWeave,
-                });
+                }
             } else {
-                next.result = Some(Self::fallback_result(board, &next));
-            }
+                Self::fallback_result(board, &next)
+            });
             return Ok(next);
         }
 
@@ -840,13 +1074,40 @@ pub fn potential_connected(board: &BoardGraph, state: &GameState, player: Player
     potential_origin_groups(board, state, player) == 1
 }
 
+/// v3 permanence-based doom: origins separated by PERMANENT terrain only —
+/// cut edges and petrified nodes. Enemy stones are not permanent walls in
+/// the layers game (networks petrify away), so they slow you down but
+/// cannot doom you. Strangle must be carved into the world itself.
+pub fn permanently_connected(board: &BoardGraph, state: &GameState, player: Player) -> bool {
+    let origins = board.definition().origins_of(player);
+    let Some(&first) = origins.first() else {
+        return true;
+    };
+    let mut visited = vec![false; board.node_count()];
+    let mut queue = VecDeque::new();
+    visited[first as usize] = true;
+    queue.push_back(first);
+    while let Some(cur) = queue.pop_front() {
+        for next in board.live_neighbors(cur, &state.cut_edges) {
+            if !visited[next as usize] && !state.is_petrified(next) {
+                visited[next as usize] = true;
+                queue.push_back(next);
+            }
+        }
+    }
+    origins.iter().all(|&o| visited[o as usize])
+}
+
 /// Number of groups the player's origins fall into under potential
 /// connectivity (1 = all connectable, 3 = fully strangled).
 pub fn potential_origin_groups(board: &BoardGraph, state: &GameState, player: Player) -> u32 {
     let origins = board.definition().origins_of(player);
-    let passable = |n: NodeId| match state.occupant(n) {
-        Some(p) => p == player,
-        None => true,
+    let passable = |n: NodeId| {
+        !state.is_petrified(n)
+            && match state.occupant(n) {
+                Some(p) => p == player,
+                None => true,
+            }
     };
     let mut groups = 0u32;
     let mut assigned = vec![false; origins.len()];
@@ -879,11 +1140,21 @@ pub fn potential_origin_groups(board: &BoardGraph, state: &GameState, player: Pl
 }
 
 /// Would cutting edge `e` strangle `player`'s own origins?
-fn cut_self_strangles(board: &BoardGraph, state: &GameState, player: Player, e: u32) -> bool {
+fn cut_self_strangles(
+    board: &BoardGraph,
+    state: &GameState,
+    player: Player,
+    e: u32,
+    permanent_only: bool,
+) -> bool {
     let mut sim = state.clone();
     sim.position_hashes = Vec::new(); // not needed for the check
     sim.cut_edges.push(e);
-    !potential_connected(board, &sim, player)
+    if permanent_only {
+        !permanently_connected(board, &sim, player)
+    } else {
+        !potential_connected(board, &sim, player)
+    }
 }
 
 /// Realm weave over the LIVE graph (cut edges removed).

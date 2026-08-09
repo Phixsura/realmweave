@@ -106,6 +106,8 @@ struct Duel {
     seed: u64,
     /// The upcoming move follows a key moment: linger longer.
     next_is_key: bool,
+    /// Layer score after the previous move (to detect scoring).
+    last_layers: [u8; 2],
     /// Board settings to restart the next game with.
     board_size: usize,
     ruleset: String,
@@ -158,8 +160,8 @@ impl Default for UiState {
         UiState {
             board_size: 61,
             pie_rule: false,
-            ruleset: realmweave_core::WEAVE_SEVER_V2.to_string(),
-            world_seed: 1,
+            ruleset: realmweave_core::WEAVE_LAYERS_V3.to_string(),
+            world_seed: 0,
             server_addr: "127.0.0.1:8420".to_string(),
             room_code: String::new(),
             replay_path: "demo-territory-hex61.json".to_string(),
@@ -208,6 +210,8 @@ struct Palette {
     last_move: Handle<StandardMaterial>,
     light_territory: Handle<StandardMaterial>,
     dark_territory: Handle<StandardMaterial>,
+    /// Petrified world structure (weave-layers-v3).
+    petrified: Handle<StandardMaterial>,
 }
 
 /// Load a system CJK font so Chinese commentary renders (egui's default
@@ -259,7 +263,7 @@ fn setup_camera(mut commands: Commands) {
             let def = boardgen::generate_standard(61).expect("standard size");
             let board = BoardGraph::new(def).expect("valid board");
             let mut session =
-                Session::hotseat_with_rules(board, false, realmweave_core::WEAVE_SEVER_V2);
+                Session::hotseat_with_rules(board, false, realmweave_core::WEAVE_LAYERS_V3);
             session.control = Control::BotDuel;
             commands.insert_resource(GameSession(session));
             commands.insert_resource(Net(None));
@@ -272,8 +276,9 @@ fn setup_camera(mut commands: Commands) {
                 commentary: vec!["—— 第 1 局开始 ——".to_string()],
                 seed: 0xD0E1,
                 next_is_key: false,
+                last_layers: [0, 0],
                 board_size: 61,
-                ruleset: realmweave_core::WEAVE_SEVER_V2.to_string(),
+                ruleset: realmweave_core::WEAVE_LAYERS_V3.to_string(),
             });
         }
     }
@@ -308,7 +313,10 @@ fn toggle_cut_mode(
     session: Option<Res<GameSession>>,
 ) {
     let Some(session) = session else { return };
-    if session.0.game.config().ruleset_id != realmweave_core::WEAVE_SEVER_V2 {
+    if !matches!(
+        session.0.game.config().ruleset_id.as_str(),
+        realmweave_core::WEAVE_SEVER_V2 | realmweave_core::WEAVE_LAYERS_V3
+    ) {
         return;
     }
     if keys.just_pressed(KeyCode::Tab) {
@@ -435,6 +443,7 @@ fn sync_board_visuals(
             last_move: materials.add(node_material(Color::srgb(0.3, 0.85, 1.0), 2.8)),
             light_territory: materials.add(node_material(Color::srgb(0.75, 0.7, 0.5), 0.2)),
             dark_territory: materials.add(node_material(Color::srgb(0.7, 0.3, 0.25), 0.2)),
+            petrified: materials.add(node_material(Color::srgb(0.42, 0.42, 0.48), 0.0)),
         };
         let shapes = Shapes {
             sphere: meshes.add(Sphere::new(0.34).mesh().ico(3).unwrap()),
@@ -575,6 +584,7 @@ fn sync_board_visuals(
         }
         transform.scale = Vec3::splat(scale);
         let handle = match (state.occupant(id), origins.get(&id)) {
+            _ if state.is_petrified(id) => &palette.petrified,
             _ if last_placed == Some(id) => &palette.last_move,
             (Some(Player::Light), Some(_)) => &palette.light_origin,
             (Some(Player::Dark), Some(_)) => &palette.dark_origin,
@@ -1045,6 +1055,7 @@ fn duel_turn(
         next.control = Control::BotDuel;
         let opener = format!("—— 第 {} 局开始 ——", duel.game_no);
         push_commentary(&mut duel.commentary, opener);
+        duel.last_layers = [0, 0];
         *s = next;
         return;
     }
@@ -1106,6 +1117,25 @@ fn duel_turn(
         line.push_str(" 🕸 编织成形——下一手是生死劫！");
     }
     push_commentary(&mut duel.commentary, line);
+    // Layer scored this move? (layers changed = petrification happened)
+    let layers_now = s.game.state().layers;
+    if layers_now != duel.last_layers {
+        let who = if layers_now[0] > duel.last_layers[0] {
+            Player::Light
+        } else {
+            Player::Dark
+        };
+        push_commentary(
+            &mut duel.commentary,
+            format!(
+                "⛰ {} 织成第 {} 层！整张网固化成世界结构，双方剪刀补给 +2，棋局在变形后的世界继续。",
+                who.name(),
+                layers_now[player_idx(who)]
+            ),
+        );
+        duel.next_is_key = true;
+        duel.last_layers = layers_now;
+    }
     let _ = &mut commands; // reserved for future effects
 }
 
@@ -1114,6 +1144,13 @@ fn push_commentary(log: &mut Vec<String>, line: String) {
     let overflow = log.len().saturating_sub(8);
     if overflow > 0 {
         log.drain(..overflow);
+    }
+}
+
+fn player_idx(p: Player) -> usize {
+    match p {
+        Player::Light => 0,
+        Player::Dark => 1,
     }
 }
 
@@ -1198,6 +1235,7 @@ fn menu_ui(mut commands: Commands, mut egui_ctx: EguiContexts, mut ui_state: Res
             ui.horizontal(|ui| {
                 ui.label("rules");
                 for (id, label) in [
+                    (realmweave_core::WEAVE_LAYERS_V3, "层层编织"),
                     (realmweave_core::WEAVE_SEVER_V2, "weave&sever"),
                     (realmweave_core::THREE_REALMS_V1, "classic"),
                     (realmweave_core::SEVER_V1, "sever"),
@@ -1305,6 +1343,7 @@ fn menu_ui(mut commands: Commands, mut egui_ctx: EguiContexts, mut ui_state: Res
                     commentary: vec!["—— 第 1 局开始 ——".to_string()],
                     seed: 0xD0E1,
                     next_is_key: false,
+                    last_layers: [0, 0],
                     board_size: ui_state.board_size,
                     ruleset: ui_state.ruleset.clone(),
                 });
@@ -1506,7 +1545,10 @@ fn game_hud(
             }
             ui.checkbox(&mut view.show_legal, "legal moves");
             ui.checkbox(&mut view.show_components, "weave highlight");
-            if s.game.config().ruleset_id == realmweave_core::WEAVE_SEVER_V2 {
+            if matches!(
+                s.game.config().ruleset_id.as_str(),
+                realmweave_core::WEAVE_SEVER_V2 | realmweave_core::WEAVE_LAYERS_V3
+            ) {
                 let label = if view.cut_mode {
                     "✂ 剪线模式 (点两个端点)"
                 } else {
@@ -1541,7 +1583,25 @@ fn game_hud(
             if charges != [0, 0] {
                 ui.label(format!("severs L:{} D:{}", charges[0], charges[1]));
             }
-            if s.game.config().ruleset_id == realmweave_core::WEAVE_SEVER_V2 {
+            if s.game.config().ruleset_id == realmweave_core::WEAVE_LAYERS_V3 {
+                let ly = s.game.state().layers;
+                ui.label(
+                    egui::RichText::new(format!(
+                        "🕸 层数 白 {}/{} | 黑 {}/{}",
+                        ly[0],
+                        realmweave_core::rules::LAYERS_TO_WIN,
+                        ly[1],
+                        realmweave_core::rules::LAYERS_TO_WIN
+                    ))
+                    .strong()
+                    .size(16.0),
+                );
+            }
+            let is_scissor_rules = matches!(
+                s.game.config().ruleset_id.as_str(),
+                realmweave_core::WEAVE_SEVER_V2 | realmweave_core::WEAVE_LAYERS_V3
+            );
+            if is_scissor_rules {
                 let sc = s.game.state().scissors;
                 ui.label(egui::RichText::new(format!("✂ 白 {} | 黑 {}", sc[0], sc[1])).strong());
                 // Lifelines: potential origin groups (1 = healthy).

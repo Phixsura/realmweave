@@ -137,6 +137,13 @@ pub struct GameState {
     /// Remaining scissors per player ([Light, Dark]; weave-sever-v2).
     #[serde(default)]
     pub scissors: [u8; 2],
+    /// Nodes petrified into neutral world structure (weave-layers-v3).
+    /// Impassable for both players, unplaceable, adjacent edges uncuttable.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub petrified: Vec<bool>,
+    /// Completed weave layers per player ([Light, Dark]; weave-layers-v3).
+    #[serde(default)]
+    pub layers: [u8; 2],
 }
 
 impl GameState {
@@ -151,6 +158,8 @@ impl GameState {
             swap_used: false,
             ply: 0,
             sever_charges: [0, 0],
+            petrified: Vec::new(),
+            layers: [0, 0],
             consecutive_passes: 0,
             position_hashes: Vec::new(),
             captures: [0, 0],
@@ -161,6 +170,11 @@ impl GameState {
 
     pub fn occupant(&self, node: NodeId) -> Option<Player> {
         self.occupancy[node as usize]
+    }
+
+    /// Is this node petrified world structure (weave-layers-v3)?
+    pub fn is_petrified(&self, node: NodeId) -> bool {
+        self.petrified.get(node as usize).copied().unwrap_or(false)
     }
 
     pub fn is_finished(&self) -> bool {

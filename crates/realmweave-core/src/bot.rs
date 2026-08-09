@@ -31,6 +31,9 @@ fn noise(seed: u64, ply: u32, k: usize) -> f64 {
 /// play from straight lines into Go-like shapes.
 fn entry_cost(game: &Game, player: Player, node: NodeId) -> Option<u32> {
     let st = game.state();
+    if st.is_petrified(node) {
+        return None; // world structure: impassable
+    }
     match st.occupant(node) {
         Some(p) if p == player => Some(0),
         Some(_) => None,
@@ -202,9 +205,17 @@ fn evaluate(game: &Game, me: Player) -> f64 {
         Player::Light => 0,
         Player::Dark => 1,
     }] as f64;
+    let layer_lead = game.state().layers[match me {
+        Player::Light => 0,
+        Player::Dark => 1,
+    }] as f64
+        - game.state().layers[match me {
+            Player::Light => 1,
+            Player::Dark => 0,
+        }] as f64;
     // Defense-weighted: protecting your own web matters more than hurting
     // theirs — aggression-first weights degenerate into strangle races.
-    theirs - 2.4 * mine + 1.2 * scissor_value
+    theirs - 2.4 * mine + 1.2 * scissor_value + 900.0 * layer_lead
 }
 
 /// Candidate moves worth considering (keeps branching manageable):
@@ -225,7 +236,7 @@ fn candidates(game: &Game, me: Player) -> Vec<Move> {
         }
     }
     for n in 0..bd.node_count() as NodeId {
-        if st.occupant(n).is_none() && near_action[n as usize] {
+        if st.occupant(n).is_none() && !st.is_petrified(n) && near_action[n as usize] {
             out.push(Move::Place(n));
         }
     }
@@ -233,7 +244,7 @@ fn candidates(game: &Game, me: Player) -> Vec<Move> {
         // opening: play near own origins/gates
         for &o in &bd.definition().origins_of(me) {
             for nb in bd.live_neighbors(o, &st.cut_edges) {
-                if st.occupant(nb).is_none() {
+                if st.occupant(nb).is_none() && !st.is_petrified(nb) {
                     out.push(Move::Place(nb));
                 }
             }
@@ -347,6 +358,6 @@ pub fn choose_move(game: &Game, seed: u64) -> Option<Move> {
 pub fn supports(ruleset_id: &str) -> bool {
     matches!(
         ruleset_id,
-        rules::WEAVE_SEVER_V2 | rules::THREE_REALMS_V1 | rules::SEVER_V1
+        rules::WEAVE_SEVER_V2 | rules::WEAVE_LAYERS_V3 | rules::THREE_REALMS_V1 | rules::SEVER_V1
     )
 }

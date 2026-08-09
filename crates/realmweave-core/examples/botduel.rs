@@ -10,10 +10,10 @@ fn main() {
         let def = boardgen::generate_standard(61).unwrap();
         let board = BoardGraph::new(def).unwrap();
         let cfg = GameConfig::new(board.definition().id.clone())
-            .with_ruleset(realmweave_core::WEAVE_SEVER_V2);
+            .with_ruleset(realmweave_core::WEAVE_LAYERS_V3);
         let mut game = Game::new(board, cfg).unwrap();
         let mut cuts = 0;
-        while game.result().is_none() && game.state().ply < 400 {
+        while game.result().is_none() && game.state().ply < 600 {
             let seed = 0xD0E1u64
                 .wrapping_add(g as u64 * 0x9E37)
                 .wrapping_add(game.state().ply as u64);
@@ -44,11 +44,12 @@ fn main() {
             }
         }
         println!(
-            "game {}: {:?} moves={} cuts={} mean_same_deg={:.2}",
+            "game {}: {:?} moves={} cuts={} layers={:?} mean_same_deg={:.2}",
             g,
             game.result(),
             n_moves,
             cuts,
+            st.layers,
             deg_sum / stones.max(1.0)
         );
     }
