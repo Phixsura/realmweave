@@ -104,6 +104,8 @@ struct Duel {
     commentary: Vec<String>,
     /// Base seed; per-game variation comes from game_no.
     seed: u64,
+    /// The upcoming move follows a key moment: linger longer.
+    next_is_key: bool,
     /// Board settings to restart the next game with.
     board_size: usize,
     ruleset: String,
@@ -269,6 +271,7 @@ fn setup_camera(mut commands: Commands) {
                 games_target: 3,
                 commentary: vec!["—— 第 1 局开始 ——".to_string()],
                 seed: 0xD0E1,
+                next_is_key: false,
                 board_size: 61,
                 ruleset: realmweave_core::WEAVE_SEVER_V2.to_string(),
             });
@@ -643,6 +646,22 @@ fn sync_board_visuals(
         }
     }
 
+    // Duel: show each side's cheapest origin-linking routes as faint trails
+    // so the viewer can SEE what both AIs are trying to do.
+    if session.0.control == Control::BotDuel {
+        for (player, color) in [
+            (Player::Light, Color::srgba(1.0, 0.95, 0.5, 0.28)),
+            (Player::Dark, Color::srgba(1.0, 0.35, 0.25, 0.28)),
+        ] {
+            for n in realmweave_core::bot::best_routes(&session.0.game, player) {
+                if state.occupant(n).is_none() {
+                    let p = Vec3::from_array(layout::node_position(board, n, view.mode));
+                    gizmos.sphere(Isometry3d::from_translation(p), 0.28, color);
+                }
+            }
+        }
+    }
+
     // Tutorial guidance: pulse suggested nodes and edges.
     if let Some(tut) = &tut {
         let hints = tut.0.hints(&session.0.game);
@@ -987,7 +1006,14 @@ fn duel_turn(
         return;
     }
     duel.timer += time.delta_secs();
-    if duel.timer < duel.pace {
+    // Variable pacing: linger on big moves (cuts, weave threats), breeze
+    // through quiet development moves.
+    let wait = if duel.next_is_key {
+        duel.pace * 2.0
+    } else {
+        duel.pace
+    };
+    if duel.timer < wait {
         return;
     }
     duel.timer = 0.0;
@@ -1040,28 +1066,45 @@ fn duel_turn(
     let my_after = realmweave_core::bot::link_cost(&s.game, mover);
     let opp_after = realmweave_core::bot::link_cost(&s.game, mover.opponent());
     let mut line = s.last_move_text().unwrap_or_default();
+    // Intent language, not raw numbers: classify by relative effect size.
+    let d_mine = my_before - my_after; // + = my position improved
+    let d_opp = opp_after - opp_before; // + = opponent hurt
     let why = match mv {
         Move::CutEdge(_) => {
-            if opp_after > opp_before {
-                format!("——断路：对方连网代价 {opp_before}→{opp_after}")
+            if d_opp >= 8 {
+                "——致命一剪：对方的主干路线断了".to_string()
+            } else if d_opp > 0 {
+                "——骚扰性剪断，逼对方绕路".to_string()
             } else {
-                "——预防性剪断".to_string()
+                "——预防性剪断，先拆掉将来会被利用的桥".to_string()
             }
         }
         Move::Place(_) => {
-            if my_after < my_before && opp_after > opp_before {
-                format!("——攻守兼备：己方 {my_before}→{my_after}，压对方 {opp_before}→{opp_after}")
-            } else if my_after < my_before {
-                format!("——铺网：连网代价 {my_before}→{my_after}")
-            } else if opp_after > opp_before {
-                format!("——拦截：对方代价 {opp_before}→{opp_after}")
+            if d_mine > 0 && d_opp > 0 {
+                "——一子两用：既延伸自己的网，又挡住对方要道".to_string()
+            } else if d_mine >= 4 {
+                "——关键连接：两片棋连上了".to_string()
+            } else if d_mine > 0 {
+                "——铺网，向下一个起源推进".to_string()
+            } else if d_opp >= 4 {
+                "——强硬拦截，封住对方必经之路".to_string()
+            } else if d_opp > 0 {
+                "——试探性挡子".to_string()
             } else {
-                "——布局".to_string()
+                "——补形，给自己的网留后路".to_string()
             }
         }
         _ => String::new(),
     };
     line.push_str(&why);
+    // Key-move detection for pacing: cuts, big swings, weave threats.
+    duel.next_is_key = matches!(mv, Move::CutEdge(_))
+        || d_mine >= 4
+        || d_opp >= 4
+        || s.game.state().pending_weave.is_some();
+    if s.game.state().pending_weave.is_some() {
+        line.push_str(" 🕸 编织成形——下一手是生死劫！");
+    }
     push_commentary(&mut duel.commentary, line);
     let _ = &mut commands; // reserved for future effects
 }
@@ -1261,6 +1304,7 @@ fn menu_ui(mut commands: Commands, mut egui_ctx: EguiContexts, mut ui_state: Res
                     games_target: 3,
                     commentary: vec!["—— 第 1 局开始 ——".to_string()],
                     seed: 0xD0E1,
+                    next_is_key: false,
                     board_size: ui_state.board_size,
                     ruleset: ui_state.ruleset.clone(),
                 });

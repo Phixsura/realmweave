@@ -73,6 +73,8 @@ pub enum RuleError {
     KoViolation(NodeId),
     #[error("edge {0} cannot be cut")]
     CannotCut(u32),
+    #[error("node {0} is adjacent to an enemy origin (sanctum)")]
+    OriginSanctum(NodeId),
     #[error("no scissors remaining")]
     NoScissors,
     #[error("this cut would strangle your own origins")]
@@ -649,8 +651,17 @@ impl RuleSet for WeaveSeverV2 {
         if state.is_finished() {
             return Vec::new();
         }
+        // Origin sanctum: enemy-origin-adjacent nodes are unplaceable.
+        let def = board.definition();
+        let enemy = state.to_move.opponent();
+        let mut sanctum = vec![false; board.node_count()];
+        for o in def.origins.iter().filter(|o| o.player == enemy) {
+            for &nb in board.neighbors(o.node) {
+                sanctum[nb as usize] = true;
+            }
+        }
         let mut moves: Vec<Move> = (0..board.node_count() as NodeId)
-            .filter(|&n| state.occupant(n).is_none())
+            .filter(|&n| state.occupant(n).is_none() && !sanctum[n as usize])
             .map(Move::Place)
             .collect();
         if state.scissors[player_index(state.to_move)] > 0 {
@@ -686,6 +697,20 @@ impl RuleSet for WeaveSeverV2 {
                 }
                 if state.occupant(*node).is_some() {
                     return Err(RuleError::Occupied(*node));
+                }
+                // Origin sanctum: you may not place adjacent to an ENEMY
+                // origin. Origins are low-degree corner nodes; without this
+                // a 2–3 stone blockade strangles them outright and every
+                // game degenerates into a blockade race. Mirrors the
+                // uncuttable origin edges.
+                let def = board.definition();
+                let enemy = state.to_move.opponent();
+                let enemy_origin_adj = def
+                    .origins
+                    .iter()
+                    .any(|o| o.player == enemy && board.neighbors(o.node).contains(node));
+                if enemy_origin_adj {
+                    return Err(RuleError::OriginSanctum(*node));
                 }
                 Ok(())
             }

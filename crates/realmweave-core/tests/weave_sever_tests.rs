@@ -3,7 +3,7 @@
 
 use realmweave_core::board::BoardGraph;
 use realmweave_core::boardgen;
-use realmweave_core::rules::{self, RuleError};
+use realmweave_core::rules::RuleError;
 use realmweave_core::{
     Game, GameConfig, GameResult, Move, NodeId, Player, Realm, WinReason, WEAVE_SEVER_V2,
 };
@@ -161,10 +161,9 @@ fn confirmation_turn_cut_breaks_single_route_weave() {
         "weave must be broken, game continues"
     );
     assert_eq!(game.state().pending_weave, None);
-    // Light can repair by routing around: place M[1,-1]? [1,-1] adj to both
-    // [1,0] and [0,-1]... adjacency: [1,-1]+[−1,1]=[0,0] ✓ so M[1,-1]
-    // reconnects center to gate side. Weave re-forms.
-    let repair = node(&game, Realm::Mortal, [1, -1]);
+    // Light repairs by routing around via M[0,1] ([1,-1] is enemy-origin
+    // sanctum now): [0,1] bridges [1,0]↔[0,0]. Weave re-forms.
+    let repair = node(&game, Realm::Mortal, [0, 1]);
     game.play(Move::Place(repair)).unwrap();
     assert_eq!(game.state().pending_weave, Some(Player::Light));
     // Dark has 2 scissors left; cuts the new artery [1,-1]–[1,0].
@@ -207,36 +206,53 @@ fn redundant_weave_survives_one_cut_and_confirms() {
     );
 }
 
-// Strangle: stones wall + cuts doom the opponent's origins → instant win.
-// Built on hex19: Dark's Mortal origin [2,-2] has neighbors [1,-1](gate),
-// [2,-1], [1,-2]. Its edges are protected, but capturing the POTENTIAL
-// connectivity means blocking all paths from that origin's region to the
-// other two origins. We build a Light wall + cuts that seal Dark's Mortal
-// origin corner completely.
+// Strangle now requires siege work at distance: the origin sanctum makes
+// origin-adjacent nodes unplaceable, so sealing Dark's Mortal origin corner
+// takes five distance-2 wall stones plus cutting both portal edges of the
+// corner's only gate. This is the intended cost of a strangle.
 #[test]
-fn strangle_by_wall_and_cut_wins_instantly() {
+fn strangle_requires_distance_walls_and_portal_cuts() {
     let mut game = new_game(19);
-    // Dark Mortal origin corner [2,-2]: exits via [1,-1], [2,-1], [1,-2].
-    // Light walls those three nodes; Dark origin region then only reaches
-    //... [1,-1] is a gate with portals up/down, but the NODE is occupied
-    // by Light = blocked. So occupying all three neighbors strangles that
-    // origin from everything (origin edges protected but lead into walls).
+    // Old fast blockade is illegal: [1,-1]M is adjacent to Dark's origin.
+    assert_eq!(
+        game.validate(&Move::Place(node(&game, Realm::Mortal, [1, -1]))),
+        Err(RuleError::OriginSanctum(node(
+            &game,
+            Realm::Mortal,
+            [1, -1]
+        )))
+    );
+    // Dark's Mortal origin region = [2,-2] + neighbors [1,-1](gate),
+    // [2,-1],[1,-2]. Outside exits: [0,0],[1,0],[0,-1],[2,0],[0,-2] plus
+    // the gate's two portal edges.
     let walls = [
-        node(&game, Realm::Mortal, [1, -1]),
-        node(&game, Realm::Mortal, [2, -1]),
-        node(&game, Realm::Mortal, [1, -2]),
+        node(&game, Realm::Mortal, [0, 0]),
+        node(&game, Realm::Mortal, [1, 0]),
+        node(&game, Realm::Mortal, [0, -1]),
+        node(&game, Realm::Mortal, [2, 0]),
+        node(&game, Realm::Mortal, [0, -2]),
     ];
     let dark_far = [
         node(&game, Realm::Heaven, [0, 2]),
         node(&game, Realm::Heaven, [-1, 2]),
+        node(&game, Realm::Heaven, [1, -2]),
+        node(&game, Realm::Heaven, [-1, -1]),
+        node(&game, Realm::Heaven, [2, -2]),
+        node(&game, Realm::Heaven, [-2, 2]),
     ];
-    game.play(Move::Place(walls[0])).unwrap(); // L
-    game.play(Move::Place(dark_far[0])).unwrap(); // D
-    game.play(Move::Place(walls[1])).unwrap(); // L
-    game.play(Move::Place(dark_far[1])).unwrap(); // D
-                                                  // Light's third wall stone completes the strangle: Dark's Mortal origin
-                                                  // can never reach its Heaven/Underworld origins again.
-    game.play(Move::Place(walls[2])).unwrap();
+    for i in 0..5 {
+        game.play(Move::Place(walls[i])).unwrap(); // L
+        game.play(Move::Place(dark_far[i])).unwrap(); // D
+    }
+    let m_gate = node(&game, Realm::Mortal, [1, -1]);
+    let h_gate = node(&game, Realm::Heaven, [1, -1]);
+    let u_gate = node(&game, Realm::Underworld, [1, -1]);
+    game.play(Move::CutEdge(edge_between(&game, h_gate, m_gate)))
+        .unwrap(); // L cut 1
+    assert!(game.result().is_none(), "one portal still open");
+    game.play(Move::Place(dark_far[5])).unwrap(); // D
+    game.play(Move::CutEdge(edge_between(&game, m_gate, u_gate)))
+        .unwrap(); // L cut 2 — seals the corner
     assert_eq!(
         game.result(),
         Some(GameResult::Win {
@@ -250,69 +266,40 @@ fn strangle_by_wall_and_cut_wins_instantly() {
 #[test]
 fn self_strangling_cut_rejected() {
     let mut game = new_game(19);
-    // Light walls in Dark's Mortal origin with 2 of 3 stones, then Dark
-    // (mid-game) must not be able to CUT its own last exit... construct
-    // simpler: Light's own origin [−2,2]M has 3 exits [-1,1](gate),[-2,1]?
-    // wait [-2,2] neighbors: [-1,1],[-1,2],[-2,1]? [-2,2]+[0,-1]=[-2,1] ✓.
-    // Origin edges are protected anyway — self-strangle via cuts must
-    // target edges FURTHER out. Build: Light corridor from origin via
-    // exactly one path, enemy stones elsewhere; cutting the corridor's only
-    // edge = self strangle. Simplest realizable: wall Light's Mortal origin
-    // with DARK stones on 2 of 3 neighbors, leaving [-1,1]; then Light
-    // cutting edge [-1,1]–[0,0]... origin still reaches [-1,1] itself
-    // (origin edge protected) and [-1,1] is a gate → escapes via portal.
-    // Instead verify the API directly on a crafted state: wall all Mortal
-    // origin neighbors with Dark except leave gate [-1,1] open; then the
-    // ONLY potential route out is through [-1,1]'s portals: cutting portal
-    // edges H[-1,1]–M[-1,1] and M[-1,1]–U[-1,1] one by one — the second
-    // cut would self-strangle if Light tried it... Dark's stones make the
-    // strangle; Light's own cuts are the test subject.
+    // Dark besieges Light's Mortal origin corner [-2,2] from distance 2
+    // (sanctum keeps the adjacent ring unplaceable): occupy every in-realm
+    // exit of the region {origin, [-1,1](gate), [-1,2], [-2,1]}.
     let dark_walls = [
-        node(&game, Realm::Mortal, [-1, 2]),
-        node(&game, Realm::Mortal, [-2, 1]),
+        node(&game, Realm::Mortal, [0, 0]),
+        node(&game, Realm::Mortal, [0, 1]),
+        node(&game, Realm::Mortal, [-1, 0]),
+        node(&game, Realm::Mortal, [0, 2]),
+        node(&game, Realm::Mortal, [-2, 0]),
     ];
     let l_filler = [
-        node(&game, Realm::Heaven, [0, 2]),
-        node(&game, Realm::Heaven, [-1, 2]),
+        node(&game, Realm::Heaven, [1, 1]),
         node(&game, Realm::Heaven, [0, -2]),
+        node(&game, Realm::Heaven, [1, -2]),
+        node(&game, Realm::Heaven, [-1, 2]),
+        node(&game, Realm::Heaven, [2, -2]),
     ];
-    game.play(Move::Place(l_filler[0])).unwrap(); // L
-    game.play(Move::Place(dark_walls[0])).unwrap(); // D
-    game.play(Move::Place(l_filler[1])).unwrap(); // L
-    game.play(Move::Place(dark_walls[1])).unwrap(); // D
-                                                    // Light origin [-2,2]M now exits only via gate [-1,1]M (portals + its
-                                                    // in-realm edges). Cut the two portal edges of [-1,1]:
+    for i in 0..5 {
+        game.play(Move::Place(l_filler[i])).unwrap(); // L
+        game.play(Move::Place(dark_walls[i])).unwrap(); // D
+    }
+    // Light's origin region now exits ONLY via the gate's two portals.
     let m_gate = node(&game, Realm::Mortal, [-1, 1]);
     let h_gate = node(&game, Realm::Heaven, [-1, 1]);
-    let _u_gate = node(&game, Realm::Underworld, [-1, 1]);
+    let u_gate = node(&game, Realm::Underworld, [-1, 1]);
     let cut1 = edge_between(&game, h_gate, m_gate);
-    game.play(Move::CutEdge(cut1)).unwrap(); // L cuts own escape 1 (legal: others remain)
-    game.play(Move::Place(node(&game, Realm::Heaven, [1, -2])))
-        .unwrap(); // D filler
-                   // in-realm exits from [-1,1]M: [0,0],[0,1],[-1,0]? [-1,1]+[0,-1]=[-1,0] ✓
-                   // all still open, so cutting portal 2 is NOT yet self-strangle. Verify
-                   // engine agrees it's legal, then verify the SelfStrangle error fires
-                   // when it truly would isolate: cut the remaining in-realm edges first.
-    let m00 = node(&game, Realm::Mortal, [0, 0]);
-    let e_a = edge_between(&game, m_gate, m00);
-    game.play(Move::CutEdge(e_a)).unwrap(); // L scissor 2
-    game.play(Move::Place(node(&game, Realm::Heaven, [2, -2])))
-        .unwrap(); // D
-                   // Remaining Light scissors: 1. Exits from origin region now:
-                   // [-1,1]M → [0,1]M, [-1,0]M, and portal M–U. Too many to seal with one
-                   // scissor → a self-strangle situation can't be reached legally here.
-                   // Assert the invariant the design demands instead: every legal cut in
-                   // the current legal_moves list keeps Light potentially connected.
-    for mv in game.legal_moves() {
-        if let Move::CutEdge(e) = mv {
-            let mut probe = game.state().clone();
-            probe.cut_edges.push(e);
-            assert!(
-                rules::potential_connected(game.board(), &probe, Player::Light),
-                "legal cut {e} must not self-strangle"
-            );
-        }
-    }
+    game.play(Move::CutEdge(cut1)).unwrap(); // legal: U portal remains
+    game.play(Move::Pass).unwrap(); // D
+    let cut2 = edge_between(&game, m_gate, u_gate);
+    assert_eq!(
+        game.validate(&Move::CutEdge(cut2)),
+        Err(RuleError::SelfStrangle),
+        "sealing your own last exit is forbidden"
+    );
 }
 
 // Edge case 7: first-to-weave confirms first even if opponent also weaves.

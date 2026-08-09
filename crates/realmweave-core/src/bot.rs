@@ -24,48 +24,166 @@ fn noise(seed: u64, ply: u32, k: usize) -> f64 {
     (x as f64) / (u64::MAX as f64)
 }
 
-/// 0/1-BFS: empties crossed to link all origin pairs over the LIVE graph.
-/// Public so UIs can narrate how a move changed each side's health.
-pub fn link_cost(game: &Game, player: Player) -> i64 {
+/// Per-node entry cost for `player` route-finding. Contested ground —
+/// empties adjacent to enemy stones — is more expensive: routes that hug
+/// the opponent are fragile (one enemy stone or cut closes them), so a
+/// careful player detours or reinforces. This single term is what bends
+/// play from straight lines into Go-like shapes.
+fn entry_cost(game: &Game, player: Player, node: NodeId) -> Option<u32> {
+    let st = game.state();
+    match st.occupant(node) {
+        Some(p) if p == player => Some(0),
+        Some(_) => None,
+        None => {
+            let bd = game.board();
+            let enemy_adj = bd
+                .live_neighbors(node, &st.cut_edges)
+                .filter(|&nb| st.occupant(nb) == Some(player.opponent()))
+                .count() as u32;
+            // base 2 per empty; +1 per adjacent enemy stone (cap +3)
+            Some(2 + enemy_adj.min(3))
+        }
+    }
+}
+
+/// Dijkstra from `from` to `to` over live edges with contested-ground
+/// costs. Returns (cost, path-nodes) or None if unreachable.
+fn route(game: &Game, player: Player, from: NodeId, to: NodeId) -> Option<(i64, Vec<NodeId>)> {
     let bd = game.board();
     let st = game.state();
+    let n = bd.node_count();
+    let mut dist = vec![i64::MAX; n];
+    let mut prev = vec![NodeId::MAX; n];
+    let mut heap = std::collections::BinaryHeap::new();
+    dist[from as usize] = 0;
+    heap.push(std::cmp::Reverse((0i64, from)));
+    while let Some(std::cmp::Reverse((d, cur))) = heap.pop() {
+        if cur == to {
+            let mut path = vec![to];
+            let mut c = to;
+            while prev[c as usize] != NodeId::MAX {
+                c = prev[c as usize];
+                path.push(c);
+            }
+            path.reverse();
+            return Some((d, path));
+        }
+        if d > dist[cur as usize] {
+            continue;
+        }
+        for nb in bd.live_neighbors(cur, &st.cut_edges) {
+            let Some(cost) = entry_cost(game, player, nb) else {
+                continue;
+            };
+            let nd = d + cost as i64;
+            if nd < dist[nb as usize] {
+                dist[nb as usize] = nd;
+                prev[nb as usize] = cur;
+                heap.push(std::cmp::Reverse((nd, nb)));
+            }
+        }
+    }
+    None
+}
+
+/// Redundancy-aware link cost for one origin pair: cheapest route, plus
+/// half the cost of the best *alternative* route that avoids the first
+/// route's empty nodes. A single thin line scores much worse than a web —
+/// this is what makes the bot build shapes instead of marching.
+fn pair_cost(game: &Game, player: Player, from: NodeId, to: NodeId) -> i64 {
+    const UNREACHABLE: i64 = 240;
+    let Some((best, path)) = route(game, player, from, to) else {
+        return UNREACHABLE;
+    };
+    // Second path: forbid the first path's empty interior nodes.
+    let st = game.state();
+    let blocked: Vec<NodeId> = path
+        .iter()
+        .copied()
+        .filter(|&nd| st.occupant(nd).is_none() && nd != from && nd != to)
+        .collect();
+    let alt = route_avoiding(game, player, from, to, &blocked).map(|(c, _)| c);
+    // If no alternative exists the connection hangs by a thread.
+    best + alt.unwrap_or(UNREACHABLE / 2) / 2
+}
+
+fn route_avoiding(
+    game: &Game,
+    player: Player,
+    from: NodeId,
+    to: NodeId,
+    blocked: &[NodeId],
+) -> Option<(i64, Vec<NodeId>)> {
+    let bd = game.board();
+    let st = game.state();
+    let n = bd.node_count();
+    let mut dist = vec![i64::MAX; n];
+    let mut prev = vec![NodeId::MAX; n];
+    let mut heap = std::collections::BinaryHeap::new();
+    dist[from as usize] = 0;
+    heap.push(std::cmp::Reverse((0i64, from)));
+    while let Some(std::cmp::Reverse((d, cur))) = heap.pop() {
+        if cur == to {
+            let mut path = vec![to];
+            let mut c = to;
+            while prev[c as usize] != NodeId::MAX {
+                c = prev[c as usize];
+                path.push(c);
+            }
+            path.reverse();
+            return Some((d, path));
+        }
+        if d > dist[cur as usize] {
+            continue;
+        }
+        for nb in bd.live_neighbors(cur, &st.cut_edges) {
+            if blocked.contains(&nb) {
+                continue;
+            }
+            let Some(cost) = entry_cost(game, player, nb) else {
+                continue;
+            };
+            let nd = d + cost as i64;
+            if nd < dist[nb as usize] {
+                dist[nb as usize] = nd;
+                prev[nb as usize] = cur;
+                heap.push(std::cmp::Reverse((nd, nb)));
+            }
+        }
+    }
+    None
+}
+
+/// Redundancy-aware cost to link all origin pairs (lower = healthier).
+/// Public so UIs can narrate how a move changed each side's position.
+pub fn link_cost(game: &Game, player: Player) -> i64 {
+    let bd = game.board();
     let origins = bd.definition().origins_of(player);
     let mut total = 0i64;
     for i in 0..origins.len() {
         for j in (i + 1)..origins.len() {
-            let (from, to) = (origins[i], origins[j]);
-            let n = bd.node_count();
-            let mut dist = vec![i64::MAX; n];
-            let mut dq = std::collections::VecDeque::new();
-            dist[from as usize] = 0;
-            dq.push_back(from);
-            let mut found = 80;
-            while let Some(cur) = dq.pop_front() {
-                if cur == to {
-                    found = dist[cur as usize];
-                    break;
-                }
-                for nb in bd.live_neighbors(cur, &st.cut_edges) {
-                    let cost = match st.occupant(nb) {
-                        Some(p) if p == player => 0,
-                        None => 1,
-                        _ => continue,
-                    };
-                    let nd = dist[cur as usize] + cost;
-                    if nd < dist[nb as usize] {
-                        dist[nb as usize] = nd;
-                        if cost == 0 {
-                            dq.push_front(nb);
-                        } else {
-                            dq.push_back(nb);
-                        }
-                    }
-                }
-            }
-            total += found;
+            total += pair_cost(game, player, origins[i], origins[j]);
         }
     }
     total
+}
+
+/// The current cheapest route nodes for `player` (all origin pairs),
+/// for UI visualization of intentions.
+pub fn best_routes(game: &Game, player: Player) -> Vec<NodeId> {
+    let bd = game.board();
+    let origins = bd.definition().origins_of(player);
+    let mut out = Vec::new();
+    for i in 0..origins.len() {
+        for j in (i + 1)..origins.len() {
+            if let Some((_, path)) = route(game, player, origins[i], origins[j]) {
+                out.extend(path);
+            }
+        }
+    }
+    out.sort_unstable();
+    out.dedup();
+    out
 }
 
 /// Static evaluation from `me`'s perspective: lower own link cost is good,
@@ -84,7 +202,9 @@ fn evaluate(game: &Game, me: Player) -> f64 {
         Player::Light => 0,
         Player::Dark => 1,
     }] as f64;
-    theirs - 1.6 * mine + 0.8 * scissor_value
+    // Defense-weighted: protecting your own web matters more than hurting
+    // theirs — aggression-first weights degenerate into strangle races.
+    theirs - 2.4 * mine + 1.2 * scissor_value
 }
 
 /// Candidate moves worth considering (keeps branching manageable):
