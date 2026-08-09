@@ -11,6 +11,7 @@ mod replay;
 mod session;
 mod steam;
 mod supplywar_ui;
+mod tutorial;
 
 use bevy::input::mouse::{MouseMotion, MouseWheel};
 use bevy::prelude::*;
@@ -56,6 +57,7 @@ fn main() {
                     sync_board_visuals,
                     orbit_camera,
                     game_hud,
+                    tutorial_panel.run_if(resource_exists::<Tutorial>),
                 )
                     .chain()
                     .run_if(resource_exists::<Active>.and(resource_exists::<GameSession>)),
@@ -83,6 +85,10 @@ struct ServerAddr(String);
 /// Active replay (Observer mode).
 #[derive(Resource)]
 struct Replay(replay::ReplayState);
+
+/// Active tutorial (wraps a vs-bot session with a step panel).
+#[derive(Resource)]
+struct Tutorial(tutorial::TutorialState);
 
 #[derive(Resource)]
 struct ViewSettings {
@@ -1015,6 +1021,21 @@ fn menu_ui(mut commands: Commands, mut egui_ctx: EguiContexts, mut ui_state: Res
             ui.small(
                 "玩法：连接你的三个起源=编织胜 · Tab 切剪线模式(✂×3) · 永久隔离对方起源=绞杀胜",
             );
+            if ui
+                .button(egui::RichText::new("📖 新手教程").strong())
+                .on_hover_text("小棋盘人机对局，边玩边学（约 5 分钟）")
+                .clicked()
+            {
+                start_hotseat(
+                    &mut commands,
+                    19,
+                    false,
+                    realmweave_core::WEAVE_SEVER_V2,
+                    0,
+                    Some(Player::Light),
+                );
+                commands.insert_resource(Tutorial(tutorial::TutorialState::new()));
+            }
             ui.add_space(12.0);
 
             ui.heading("Online");
@@ -1264,6 +1285,7 @@ fn game_hud(
                 ui.label(egui::RichText::new(text).italics());
             }
             if ui.button("leave").clicked() {
+                commands.remove_resource::<Tutorial>();
                 commands.remove_resource::<Active>();
                 commands.remove_resource::<GameSession>();
                 commands.remove_resource::<Net>();
@@ -1434,6 +1456,64 @@ fn try_reconnect(commands: &mut Commands, session: &Session, ui: &UiState) {
         });
         commands.insert_resource(Net(Some(handle)));
     }
+}
+
+/// Tutorial side panel: reads the live game, advances steps, renders text.
+fn tutorial_panel(
+    mut commands: Commands,
+    mut egui_ctx: EguiContexts,
+    mut tut: ResMut<Tutorial>,
+    session: Res<GameSession>,
+    nodes: Query<Entity, With<NodeMarker>>,
+    mut ui_state: ResMut<UiState>,
+) {
+    let game = &session.0.game;
+    tut.0.advance(game);
+    let (title, body, button) = tut.0.text(game);
+    let (idx, total) = tut.0.progress();
+    let ctx = egui_ctx.ctx_mut();
+    egui::SidePanel::right("tutorial")
+        .resizable(false)
+        .default_width(320.0)
+        .show(ctx, |ui| {
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                ui.heading(title);
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(format!("{}/{}", idx.min(total), total));
+                });
+            });
+            ui.add(egui::ProgressBar::new(idx as f32 / total as f32).desired_height(6.0));
+            ui.add_space(8.0);
+            ui.label(body);
+            ui.add_space(12.0);
+            if let Some(label) = button {
+                if ui.button(egui::RichText::new(label).strong()).clicked() {
+                    if tut.0.step == tutorial::Step::Done {
+                        // back to menu: same cleanup as the leave button
+                        commands.remove_resource::<Tutorial>();
+                        commands.remove_resource::<Active>();
+                        commands.remove_resource::<GameSession>();
+                        commands.remove_resource::<Net>();
+                        commands.remove_resource::<BoardSpawned>();
+                        commands.remove_resource::<Palette>();
+                        commands.remove_resource::<Replay>();
+                        for entity in &nodes {
+                            commands.entity(entity).despawn();
+                        }
+                        ui_state.status.clear();
+                    } else {
+                        tut.0.next_button();
+                    }
+                }
+            }
+            ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
+                ui.add_space(8.0);
+                if ui.small_button("跳过教程").clicked() {
+                    commands.remove_resource::<Tutorial>();
+                }
+            });
+        });
 }
 
 fn lifeline(groups: u32) -> &'static str {
