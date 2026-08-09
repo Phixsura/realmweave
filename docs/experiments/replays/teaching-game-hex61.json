@@ -1,0 +1,149 @@
+{
+  "config": {
+    "ruleset_id": "three-realms-supply-v1",
+    "board_id": "hex61-v1",
+    "pie_rule": false
+  },
+  "moves": [
+    {
+      "Place": 76
+    },
+    {
+      "Place": 106
+    },
+    {
+      "Place": 83
+    },
+    {
+      "Place": 99
+    },
+    {
+      "Place": 54
+    },
+    {
+      "Place": 6
+    },
+    {
+      "Place": 149
+    },
+    {
+      "Place": 155
+    },
+    {
+      "Place": 91
+    },
+    {
+      "Place": 107
+    },
+    {
+      "Place": 92
+    },
+    {
+      "Place": 93
+    },
+    {
+      "Place": 101
+    },
+    {
+      "Place": 102
+    },
+    {
+      "Place": 109
+    },
+    {
+      "Place": 103
+    },
+    {
+      "Place": 84
+    },
+    {
+      "Place": 13
+    },
+    {
+      "Place": 85
+    },
+    {
+      "Place": 14
+    },
+    {
+      "Place": 94
+    },
+    {
+      "Place": 21
+    },
+    {
+      "Place": 110
+    },
+    {
+      "Place": 22
+    },
+    {
+      "Place": 95
+    },
+    {
+      "Place": 15
+    },
+    {
+      "Place": 114
+    },
+    {
+      "Place": 146
+    },
+    {
+      "Place": 90
+    },
+    {
+      "Place": 154
+    },
+    {
+      "Place": 158
+    },
+    {
+      "Place": 147
+    },
+    {
+      "Place": 47
+    },
+    {
+      "Place": 7
+    },
+    {
+      "Place": 150
+    },
+    {
+      "Place": 164
+    },
+    {
+      "Place": 48
+    },
+    {
+      "Place": 113
+    },
+    {
+      "Place": 69
+    },
+    {
+      "Place": 115
+    },
+    {
+      "Place": 53
+    },
+    {
+      "Place": 8
+    },
+    {
+      "Place": 157
+    },
+    {
+      "Place": 139
+    },
+    "Pass",
+    "Pass"
+  ],
+  "result": {
+    "Win": {
+      "player": "Light",
+      "reason": "Territory"
+    }
+  }
+}
