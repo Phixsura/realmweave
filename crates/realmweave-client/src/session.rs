@@ -24,6 +24,8 @@ pub enum Control {
     Seat(Player),
     /// Local vs AI: the human plays this color, the bot plays the other.
     VsBot(Player),
+    /// AI vs AI exhibition: both colors are bot-driven; no human input.
+    BotDuel,
     /// Replay viewer: no input at all.
     Observer,
 }
@@ -84,7 +86,7 @@ impl Session {
         match self.control {
             Control::HotSeat => true,
             Control::Seat(p) | Control::VsBot(p) => self.game.to_move() == p,
-            Control::Observer => false,
+            Control::Observer | Control::BotDuel => false,
         }
     }
 

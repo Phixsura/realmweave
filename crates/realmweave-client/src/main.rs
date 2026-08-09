@@ -52,12 +52,14 @@ fn main() {
                     toggle_cut_mode,
                     handle_intents,
                     bot_turn,
+                    duel_turn,
                     replay_autoplay,
                     apply_replay_cursor,
                     sync_board_visuals,
                     orbit_camera,
                     game_hud,
                     tutorial_panel.run_if(resource_exists::<Tutorial>),
+                    duel_panel.run_if(resource_exists::<Duel>),
                 )
                     .chain()
                     .run_if(resource_exists::<Active>.and(resource_exists::<GameSession>)),
@@ -89,6 +91,23 @@ struct Replay(replay::ReplayState);
 /// Active tutorial (wraps a vs-bot session with a step panel).
 #[derive(Resource)]
 struct Tutorial(tutorial::TutorialState);
+
+/// AI-vs-AI exhibition: slow-paced bot duel with live commentary.
+#[derive(Resource)]
+struct Duel {
+    /// Seconds between moves ("slow enough to read the board").
+    pace: f32,
+    timer: f32,
+    game_no: u32,
+    games_target: u32,
+    /// Rolling commentary, newest last (kept short).
+    commentary: Vec<String>,
+    /// Base seed; per-game variation comes from game_no.
+    seed: u64,
+    /// Board settings to restart the next game with.
+    board_size: usize,
+    ruleset: String,
+}
 
 #[derive(Resource)]
 struct ViewSettings {
@@ -234,6 +253,25 @@ fn setup_camera(mut commands: Commands) {
             sw.autopilot = v.ends_with(":demo");
             commands.insert_resource(sw);
             commands.insert_resource(Active);
+        } else if v == "duel" {
+            let def = boardgen::generate_standard(61).expect("standard size");
+            let board = BoardGraph::new(def).expect("valid board");
+            let mut session =
+                Session::hotseat_with_rules(board, false, realmweave_core::WEAVE_SEVER_V2);
+            session.control = Control::BotDuel;
+            commands.insert_resource(GameSession(session));
+            commands.insert_resource(Net(None));
+            commands.insert_resource(Active);
+            commands.insert_resource(Duel {
+                pace: 2.5,
+                timer: 0.0,
+                game_no: 1,
+                games_target: 3,
+                commentary: vec!["—— 第 1 局开始 ——".to_string()],
+                seed: 0xD0E1,
+                board_size: 61,
+                ruleset: realmweave_core::WEAVE_SEVER_V2.to_string(),
+            });
         }
     }
     commands.spawn((
@@ -935,6 +973,117 @@ fn gentle_bot_move(game: &Game, seed: u64) -> Option<Move> {
     Some(Move::Place(cands[pick]))
 }
 
+/// AI-vs-AI exhibition driver: play one move per `pace` seconds with
+/// narrated reasoning; start the next game when one ends.
+fn duel_turn(
+    time: Res<Time>,
+    mut commands: Commands,
+    duel: Option<ResMut<Duel>>,
+    mut session: ResMut<GameSession>,
+) {
+    let Some(mut duel) = duel else { return };
+    let s = &mut session.0;
+    if s.control != Control::BotDuel {
+        return;
+    }
+    duel.timer += time.delta_secs();
+    if duel.timer < duel.pace {
+        return;
+    }
+    duel.timer = 0.0;
+
+    // Game over → linger one beat, then next game or stop.
+    if let Some(result) = s.result() {
+        let verdict = match result {
+            GameResult::Win { player, reason } => format!(
+                "第 {} 局结束：{} 获胜（{}），共 {} 手",
+                duel.game_no,
+                player.name(),
+                win_reason_name(reason),
+                s.game.state().move_log.len()
+            ),
+            GameResult::Draw => format!("第 {} 局结束：平局", duel.game_no),
+        };
+        push_commentary(&mut duel.commentary, verdict);
+        if duel.game_no >= duel.games_target {
+            push_commentary(
+                &mut duel.commentary,
+                "对弈结束。点 leave 返回菜单。".to_string(),
+            );
+            return;
+        }
+        duel.game_no += 1;
+        let def = boardgen::generate_standard(duel.board_size).expect("standard size");
+        let board = BoardGraph::new(def).expect("valid board");
+        let mut next = Session::hotseat_with_rules(board, false, &duel.ruleset.clone());
+        next.control = Control::BotDuel;
+        let opener = format!("—— 第 {} 局开始 ——", duel.game_no);
+        push_commentary(&mut duel.commentary, opener);
+        *s = next;
+        return;
+    }
+
+    let mover = s.game.to_move();
+    // Health before the move, both sides, for narration.
+    let my_before = realmweave_core::bot::link_cost(&s.game, mover);
+    let opp_before = realmweave_core::bot::link_cost(&s.game, mover.opponent());
+    let seed = duel
+        .seed
+        .wrapping_add(duel.game_no as u64 * 0x9E37)
+        .wrapping_add(s.game.state().ply as u64);
+    let mv =
+        realmweave_core::bot::choose_move(&s.game, seed).unwrap_or(realmweave_core::Move::Pass);
+    if s.game.play(mv).is_err() {
+        let _ = s.game.play(realmweave_core::Move::Pass);
+        return;
+    }
+    let my_after = realmweave_core::bot::link_cost(&s.game, mover);
+    let opp_after = realmweave_core::bot::link_cost(&s.game, mover.opponent());
+    let mut line = s.last_move_text().unwrap_or_default();
+    let why = match mv {
+        Move::CutEdge(_) => {
+            if opp_after > opp_before {
+                format!("——断路：对方连网代价 {opp_before}→{opp_after}")
+            } else {
+                "——预防性剪断".to_string()
+            }
+        }
+        Move::Place(_) => {
+            if my_after < my_before && opp_after > opp_before {
+                format!("——攻守兼备：己方 {my_before}→{my_after}，压对方 {opp_before}→{opp_after}")
+            } else if my_after < my_before {
+                format!("——铺网：连网代价 {my_before}→{my_after}")
+            } else if opp_after > opp_before {
+                format!("——拦截：对方代价 {opp_before}→{opp_after}")
+            } else {
+                "——布局".to_string()
+            }
+        }
+        _ => String::new(),
+    };
+    line.push_str(&why);
+    push_commentary(&mut duel.commentary, line);
+    let _ = &mut commands; // reserved for future effects
+}
+
+fn push_commentary(log: &mut Vec<String>, line: String) {
+    log.push(line);
+    let overflow = log.len().saturating_sub(8);
+    if overflow > 0 {
+        log.drain(..overflow);
+    }
+}
+
+fn win_reason_name(reason: WinReason) -> &'static str {
+    match reason {
+        WinReason::RealmWeave => "编织成网",
+        WinReason::Strangle => "绞杀",
+        WinReason::Territory => "领地",
+        WinReason::Resignation => "认输",
+        WinReason::Timeout => "超时",
+    }
+}
+
 /// Demo auto-play: advance the replay cursor on a timer.
 fn replay_autoplay(time: Res<Time>, replay: Option<ResMut<Replay>>) {
     let Some(mut replay) = replay else { return };
@@ -1092,6 +1241,30 @@ fn menu_ui(mut commands: Commands, mut egui_ctx: EguiContexts, mut ui_state: Res
             ui.small(
                 "玩法：连接你的三个起源=编织胜 · Tab 切剪线模式(✂×3) · 永久隔离对方起源=绞杀胜",
             );
+            if realmweave_core::bot::supports(&ui_state.ruleset)
+                && ui
+                    .button("🤖 AI 对弈演示 (慢速讲解 3 局)")
+                    .on_hover_text("两个 AI 慢速对弈，每手播报意图")
+                    .clicked()
+            {
+                let def = boardgen::generate_standard(ui_state.board_size).expect("standard size");
+                let board = BoardGraph::new(def).expect("valid board");
+                let mut session = Session::hotseat_with_rules(board, false, &ui_state.ruleset);
+                session.control = Control::BotDuel;
+                commands.insert_resource(GameSession(session));
+                commands.insert_resource(Net(None));
+                commands.insert_resource(Active);
+                commands.insert_resource(Duel {
+                    pace: 2.5,
+                    timer: 0.0,
+                    game_no: 1,
+                    games_target: 3,
+                    commentary: vec!["—— 第 1 局开始 ——".to_string()],
+                    seed: 0xD0E1,
+                    board_size: ui_state.board_size,
+                    ruleset: ui_state.ruleset.clone(),
+                });
+            }
             if ui
                 .button(egui::RichText::new("📖 新手教程").strong())
                 .on_hover_text("小棋盘人机对局，边玩边学（约 5 分钟）")
@@ -1357,6 +1530,7 @@ fn game_hud(
             }
             if ui.button("leave").clicked() {
                 commands.remove_resource::<Tutorial>();
+                commands.remove_resource::<Duel>();
                 commands.remove_resource::<Active>();
                 commands.remove_resource::<GameSession>();
                 commands.remove_resource::<Net>();
@@ -1527,6 +1701,28 @@ fn try_reconnect(commands: &mut Commands, session: &Session, ui: &UiState) {
         });
         commands.insert_resource(Net(Some(handle)));
     }
+}
+
+/// Duel commentary panel: shows the exhibition's rolling narration.
+fn duel_panel(mut egui_ctx: EguiContexts, duel: Res<Duel>, session: Res<GameSession>) {
+    let ctx = egui_ctx.ctx_mut();
+    egui::SidePanel::right("duel")
+        .resizable(false)
+        .default_width(360.0)
+        .show(ctx, |ui| {
+            ui.add_space(8.0);
+            ui.heading(format!(
+                "AI 对弈 · 第 {}/{} 局 · 第 {} 手",
+                duel.game_no,
+                duel.games_target,
+                session.0.game.state().move_log.len()
+            ));
+            ui.add_space(6.0);
+            for line in &duel.commentary {
+                ui.label(line);
+                ui.add_space(2.0);
+            }
+        });
 }
 
 /// Tutorial side panel: reads the live game, advances steps, renders text.

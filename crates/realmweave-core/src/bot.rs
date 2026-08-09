@@ -25,7 +25,8 @@ fn noise(seed: u64, ply: u32, k: usize) -> f64 {
 }
 
 /// 0/1-BFS: empties crossed to link all origin pairs over the LIVE graph.
-fn link_cost(game: &Game, player: Player) -> i64 {
+/// Public so UIs can narrate how a move changed each side's health.
+pub fn link_cost(game: &Game, player: Player) -> i64 {
     let bd = game.board();
     let st = game.state();
     let origins = bd.definition().origins_of(player);
