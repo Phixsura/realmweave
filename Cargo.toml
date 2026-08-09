@@ -1,0 +1,32 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/realmweave-core",
+    "crates/realmweave-protocol",
+    "crates/realmweave-server",
+    "crates/realmweave-sim",
+    "crates/realmweave-client",
+    "crates/realmweave-cli",
+    "crates/realmweave-supplywar",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/Phixsura/realmweave"
+
+[workspace.dependencies]
+realmweave-core = { path = "crates/realmweave-core" }
+realmweave-protocol = { path = "crates/realmweave-protocol" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+clap = { version = "4", features = ["derive"] }
+tokio = { version = "1", features = ["full"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+rand = "0.8"
+
+# Keep the client snappy in dev without full release builds.
+[profile.dev.package."*"]
+opt-level = 2
