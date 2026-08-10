@@ -1,49 +1,54 @@
-//! Tutorial step conditions verified against a real scripted game through
-//! the same core APIs the tutorial panel reads.
+//! Tutorial step conditions verified against a real scripted trinity game
+//! through the same core APIs the tutorial panel reads.
+#![allow(clippy::unwrap_used, clippy::expect_used)] // test code
 
-#![allow(clippy::unwrap_used, clippy::expect_used)] // test/tooling code
-use realmweave_core::{boardgen, BoardGraph, Game, GameConfig, Move, Realm};
+use realmweave_core::rules::TrinityY;
+use realmweave_core::{boardgen, BoardGraph, Game, GameConfig, Move, Player, TRINITY_Y_V4};
 
 #[test]
 fn scripted_tutorial_conditions_hold() {
-    let def = boardgen::generate_standard(19).unwrap();
+    let side = 8usize;
+    let def = boardgen::generate_trinity(side).unwrap();
     let board = BoardGraph::new(def).unwrap();
-    let cfg = GameConfig {
-        ruleset_id: realmweave_core::WEAVE_SEVER_V2.to_string(),
-        board_id: board.definition().id.clone(),
-        pie_rule: false,
-        time_control: None,
-    };
+    let cfg = GameConfig::new(board.definition().id.clone()).with_ruleset(TRINITY_Y_V4);
     let mut game = Game::new(board, cfg).unwrap();
+    let idx = |r: usize, c: usize| (r * (r + 1) / 2 + c) as u16;
 
-    // FirstStone condition: human (Light) has made a move at an even index.
-    let first_empty = (0..game.board().node_count() as u16)
-        .find(|&n| game.state().occupant(n).is_none() && game.validate(&Move::Place(n)).is_ok())
-        .unwrap();
-    game.play(Move::Place(first_empty)).unwrap();
+    let per = side * (side + 1) / 2;
+    // Light builds down the left edge; Dark fills distinct realm-2 cells.
+    let mut dark_i = 0usize;
+    let mut dark = move || {
+        dark_i += 1;
+        (2 * per + dark_i - 1) as u16
+    };
+
+    // FirstStone: human (Light) moves at even indices.
+    game.play(Move::Place(idx(3, 1))).unwrap();
     assert_eq!(game.state().move_log.len() % 2, 1);
+    game.play(Move::Place(dark())).unwrap();
 
-    // CrossRealm condition is realm-count based: realm lookup must work.
-    let realm0 = game.board().definition().nodes[first_empty as usize].realm;
-    assert!(matches!(
-        realm0,
-        Realm::Heaven | Realm::Mortal | Realm::Underworld
-    ));
-
-    // UseScissors condition: a Light CutEdge is detectable in the log.
-    let dark_spot = (0..game.board().node_count() as u16)
-        .find(|&n| game.state().occupant(n).is_none() && game.validate(&Move::Place(n)).is_ok())
-        .unwrap();
-    game.play(Move::Place(dark_spot)).unwrap();
-    if let Some(e) = (0..game.board().definition().edges.len() as u32)
-        .find(|&e| game.validate(&Move::CutEdge(e)).is_ok())
-    {
-        game.play(Move::CutEdge(e)).unwrap();
-        assert!(game
-            .state()
-            .move_log
-            .iter()
-            .enumerate()
-            .any(|(i, m)| i % 2 == 0 && matches!(m, Move::CutEdge(_))));
+    // TouchTwoSides: reach the left edge, then the bottom row.
+    game.play(Move::Place(idx(3, 0))).unwrap(); // touches left
+    game.play(Move::Place(dark())).unwrap();
+    for r in 4..side {
+        game.play(Move::Place(idx(r, 0))).unwrap();
+        game.play(Move::Place(dark())).unwrap();
     }
+    // bottom-left corner touches left + bottom = 2 sides
+    let side_mask = boardgen::trinity_sides(side, idx(side - 1, 0));
+    assert!(side_mask.count_ones() >= 2, "corner touches two sides");
+
+    // WinRealm condition: no Y yet; complete the bottom row → Y.
+    assert!(TrinityY::realm_winner(game.board(), game.state(), 0).is_none());
+    for c in 1..side {
+        game.play(Move::Place(idx(side - 1, c))).unwrap();
+        if c < side - 1 {
+            game.play(Move::Place(dark())).unwrap();
+        }
+    }
+    assert_eq!(
+        TrinityY::realm_winner(game.board(), game.state(), 0),
+        Some(Player::Light),
+        "left edge + bottom row = Y"
+    );
 }

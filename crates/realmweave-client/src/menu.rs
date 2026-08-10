@@ -184,9 +184,9 @@ pub(crate) fn menu_ui(
             {
                 start_hotseat(
                     &mut commands,
-                    19,
+                    19, // → triangle side 8 under the trinity ruleset
                     false,
-                    realmweave_core::WEAVE_SEVER_V2,
+                    realmweave_core::TRINITY_Y_V4,
                     0,
                     Some(Player::Light),
                 );
@@ -264,9 +264,12 @@ pub(crate) fn start_hotseat(
 
 pub(crate) fn start_online_create(commands: &mut Commands, ui: &mut UiState) {
     let handle = net::connect(&ui.server_addr);
-    let board_id = format!("hex{}-v1", ui.board_size);
-    // Local mirror starts from the same generated board; the server snapshot
-    // will confirm.
+    let board_id = if ui.ruleset == realmweave_core::TRINITY_Y_V4 {
+        "tri14-v4".to_string()
+    } else {
+        format!("hex{}-v1", ui.board_size)
+    };
+    // Local mirror starts from the same board; the server snapshot confirms.
     match net::fetch_board(&ui.server_addr, &board_id)
         .and_then(|def| BoardGraph::new(def).map_err(|e| e.to_string()))
     {
@@ -278,7 +281,7 @@ pub(crate) fn start_online_create(commands: &mut Commands, ui: &mut UiState) {
             handle.send(ClientMessage::CreateRoom {
                 config: config.clone(),
             });
-            let mut session = Session::hotseat(board, ui.pie_rule);
+            let mut session = Session::hotseat_with_rules(board, ui.pie_rule, &ui.ruleset);
             session.control = Control::Seat(Player::Light);
             commands.insert_resource(GameSession(session));
             commands.insert_resource(Net(Some(handle)));

@@ -24,6 +24,15 @@ pub enum GameError {
     /// `undo` with an empty history.
     #[error("nothing to undo")]
     NothingToUndo,
+    /// Ruleset and board goal-structure don't match (e.g. trinity on a
+    /// hex board, or an origin ruleset on a side-goal board).
+    #[error("ruleset {ruleset} cannot play board {board}")]
+    IncompatibleBoard {
+        /// The requested ruleset id.
+        ruleset: String,
+        /// The offending board id.
+        board: String,
+    },
 }
 
 /// Serializable record from which a finished (or in-progress) game can be
@@ -60,6 +69,17 @@ impl Game {
             });
         }
         let ruleset = rules::ruleset_by_id(&config.ruleset_id, config.pie_rule)?;
+        // Ruleset/board compatibility: trinity plays side-goal triangle
+        // boards (no origins); every other ruleset needs origins. A
+        // mismatch produces silent nonsense games, so reject it here.
+        let has_origins = !board.definition().origins.is_empty();
+        let wants_origins = config.ruleset_id != rules::TRINITY_Y_V4;
+        if has_origins != wants_origins {
+            return Err(GameError::IncompatibleBoard {
+                ruleset: config.ruleset_id.clone(),
+                board: board.definition().id.clone(),
+            });
+        }
         let mut state = GameState::new(config.board_id.clone(), board.node_count());
         // Origins are pre-occupied by their owners and are part of the
         // player's network from the start.

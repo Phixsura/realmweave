@@ -1,13 +1,16 @@
-//! Interactive tutorial: a real 19×3 game vs the bot, with a step panel
-//! whose progression is driven by the actual game state — the player learns
-//! by doing, not by reading.
+//! Interactive tutorial: a real small-board Trinity Y game vs the bot, with
+//! a step panel whose progression is driven by the actual game state — the
+//! player learns by doing, not by reading.
 
-use realmweave_core::{Game, Move, NodeId, Player, Realm};
+use realmweave_core::rules::TrinityY;
+use realmweave_core::{boardgen, Game, Move, NodeId, Player};
 
 /// Board-level guidance for the current step: nodes and edges to pulse.
 #[derive(Default)]
 pub struct Hints {
+    /// Nodes to highlight.
     pub nodes: Vec<NodeId>,
+    /// Edges to highlight (unused by the trinity tutorial; kept for parity).
     pub edges: Vec<u32>,
 }
 
@@ -16,9 +19,9 @@ pub struct Hints {
 pub enum BotMode {
     /// Reading step: the AI waits for you.
     Paused,
-    /// Teaching steps: plays simple placements only, never cuts.
+    /// Teaching steps: plays simple placements, avoids fights.
     Gentle,
-    /// Final step: the real bot.
+    /// Final step: the real engine.
     Full,
 }
 
@@ -26,22 +29,32 @@ pub enum BotMode {
 /// satisfies their goal; a few are read-only and advance by button.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Step {
+    /// Orientation: realms, sides, the Y goal.
     Welcome,
+    /// Place the first stone.
     FirstStone,
-    CrossRealm,
-    UseScissors,
-    Lifeline,
+    /// Grow a group that touches two different sides of one realm.
+    TouchTwoSides,
+    /// The death rule: liberties and capture.
+    Death,
+    /// Win a realm (complete a Y).
+    WinRealm,
+    /// Play the match out (two realms win).
     FinishGame,
+    /// Wrap-up.
     Done,
 }
 
+/// Live tutorial state.
 pub struct TutorialState {
+    /// Current step.
     pub step: Step,
     /// The color the human plays (always Light in the tutorial).
     pub human: Player,
 }
 
 impl TutorialState {
+    /// Fresh tutorial at the welcome step.
     pub fn new() -> Self {
         TutorialState {
             step: Step::Welcome,
@@ -49,9 +62,8 @@ impl TutorialState {
         }
     }
 
-    /// Number of moves the human has made.
+    /// The human's moves (Light moves at even move-log indices).
     fn human_moves(&self, game: &Game) -> Vec<Move> {
-        // Light moves at even move-log indices (strict alternation).
         let par = match self.human {
             Player::Light => 0,
             Player::Dark => 1,
@@ -65,60 +77,60 @@ impl TutorialState {
             .collect()
     }
 
-    /// Distinct realms where the human has stones.
-    fn realms_touched(&self, game: &Game) -> usize {
-        let mut seen = [false; 3];
-        for (n, occ) in game.state().occupancy.iter().enumerate() {
-            if *occ == Some(self.human) {
-                let realm = game.board().definition().nodes[n].realm;
-                seen[match realm {
-                    Realm::Heaven => 0,
-                    Realm::Mortal => 1,
-                    Realm::Underworld => 2,
-                }] = true;
+    /// Side length of the tutorial board.
+    fn side(game: &Game) -> usize {
+        let per_realm = game.board().node_count() / 3;
+        (((8 * per_realm + 1) as f64).sqrt() as usize - 1) / 2
+    }
+
+    /// Max number of distinct sides touched by any single human group.
+    fn best_group_sides(&self, game: &Game) -> u32 {
+        let bd = game.board();
+        let st = game.state();
+        let side = Self::side(game);
+        let n = bd.node_count();
+        let mut visited = vec![false; n];
+        let mut best = 0u32;
+        for start in 0..n as NodeId {
+            if st.occupant(start) != Some(self.human) || visited[start as usize] {
+                continue;
             }
+            let mut stack = vec![start];
+            visited[start as usize] = true;
+            let mut mask = boardgen::trinity_sides(side, start);
+            let realm = start as usize / (n / 3);
+            while let Some(cur) = stack.pop() {
+                for &nb in bd.neighbors(cur) {
+                    if nb as usize / (n / 3) != realm {
+                        continue;
+                    }
+                    if !visited[nb as usize] && st.occupant(nb) == Some(self.human) {
+                        visited[nb as usize] = true;
+                        mask |= boardgen::trinity_sides(side, nb);
+                        stack.push(nb);
+                    }
+                }
+            }
+            best = best.max(mask.count_ones());
         }
-        seen.iter().filter(|&&b| b).count()
+        best
     }
 
     /// Advance the step if its goal is met by the current game state.
-    /// Returns true when the step just changed (caller may flash the panel).
+    /// Returns true when the step just changed.
     pub fn advance(&mut self, game: &Game) -> bool {
         let next = match self.step {
             Step::Welcome => None, // button-driven
-            Step::FirstStone => {
-                if !self.human_moves(game).is_empty() {
-                    Some(Step::CrossRealm)
-                } else {
-                    None
-                }
+            Step::FirstStone => (!self.human_moves(game).is_empty()).then_some(Step::TouchTwoSides),
+            Step::TouchTwoSides => (self.best_group_sides(game) >= 2).then_some(Step::Death),
+            Step::Death => None, // button-driven
+            Step::WinRealm => {
+                let won = (0..3).any(|r| {
+                    TrinityY::realm_winner(game.board(), game.state(), r) == Some(self.human)
+                });
+                won.then_some(Step::FinishGame)
             }
-            Step::CrossRealm => {
-                if self.realms_touched(game) >= 2 {
-                    Some(Step::UseScissors)
-                } else {
-                    None
-                }
-            }
-            Step::UseScissors => {
-                if self
-                    .human_moves(game)
-                    .iter()
-                    .any(|m| matches!(m, Move::CutEdge(_)))
-                {
-                    Some(Step::Lifeline)
-                } else {
-                    None
-                }
-            }
-            Step::Lifeline => None, // button-driven
-            Step::FinishGame => {
-                if game.result().is_some() {
-                    Some(Step::Done)
-                } else {
-                    None
-                }
-            }
+            Step::FinishGame => game.result().is_some().then_some(Step::Done),
             Step::Done => None,
         };
         if let Some(n) = next {
@@ -133,7 +145,7 @@ impl TutorialState {
     pub fn next_button(&mut self) {
         self.step = match self.step {
             Step::Welcome => Step::FirstStone,
-            Step::Lifeline => Step::FinishGame,
+            Step::Death => Step::WinRealm,
             other => other,
         };
     }
@@ -143,74 +155,74 @@ impl TutorialState {
         match self.step {
             Step::Welcome => (
                 "欢迎来到 Realmweave",
-                "棋盘有三层界域：天界、人间、冥界。\n\
-                 你执白（发光球体），AI 执黑（棱锥）。\n\
-                 你在每层各有一个「起源」（高亮节点）。\n\n\
-                 目标：把三个起源连成一张网 = 编织胜。\n\n\
-                 拖动鼠标旋转视角，滚轮缩放，V 切换 2D 分析视图。"
+                "战场是三个三角形界域：天界、人间、冥界。\n\
+                 你执白（发光球体），AI 执黑（棱锥）。\n\n\
+                 目标：在一个界域里，用一条相连的棋链\n\
+                 同时触到三条边——这叫「织成」该界域。\n\
+                 先织成两个界域者获胜。\n\n\
+                 数学保证：每个界域最终必属一人，绝无和局。\n\
+                 拖动旋转视角，滚轮缩放，V 切 2D 视图。"
                     .to_string(),
                 Some("开始 →"),
             ),
             Step::FirstStone => (
-                "第一手：落子",
-                "点击任意空节点放下一颗棋子。\n\
-                 建议下在自己起源附近——你的网要从起源长出来。\n\
-                 同色相邻的棋子自动连通。"
+                "第一手",
+                "点击任意空点落子。\n\
+                 建议从一个界域的中腹开始——中心离三条边都近，\n\
+                 贴边的直线容易被一刀切断。"
                     .to_string(),
                 None,
             ),
-            Step::CrossRealm => {
-                let n = self.realms_touched(game);
+            Step::TouchTwoSides => {
+                let n = self.best_group_sides(game);
                 (
-                    "跨越界域",
+                    "伸向两条边",
                     format!(
-                        "三个起源分别在三层，光靠一层连不成网。\n\
-                         紫色竖线是「门」——唯一能穿越界域的通道。\n\
-                         门很稀少，是全盘必争之地。\n\n\
-                         目标：在第二层界域落子（已触及 {n}/2 层）。\n\
-                         提示：先占住一根门柱的端点。"
+                        "把你的棋链延伸到界域的两条不同的边\n\
+                         （目前最好的链触到 {n}/2 条）。\n\n\
+                         同色相邻自动相连。斜着走（尖）比\n\
+                         排直线更有弹性——两条路可以连回来。"
                     ),
                     None,
                 )
             }
-            Step::UseScissors => (
-                "剪刀：改变世界",
-                "你有 3 把剪刀（HUD 上的 ✂）。剪断一条边，它就永远消失——\n\
-                 不是挡路，是把路从世界上抹掉。\n\n\
-                 按 Tab 进入剪线模式，依次点击一条边的两个端点。\n\
-                 剪 AI 棋子旁边的边，断它的连接。\n\
-                 （起源紧邻的边受保护，剪不断。）"
-                    .to_string(),
-                None,
-            ),
-            Step::Lifeline => (
-                "绞杀：另一条胜路",
-                "剪刀带来第二种胜利：如果对手的三个起源被剪得\n\
-                 「永久无法互连」（无论后面怎么下都连不上），\n\
-                 它就被绞杀，你直接获胜。\n\n\
-                 HUD 的「生命线」显示双方起源的连通健康度；\n\
-                 出现红色 ⚠ 表示有人的起源已被割裂。\n\
-                 注意：让自己被割裂的剪法是禁着。"
+            Step::Death => (
+                "死亡规则",
+                "关键规则：一条棋链周围没有任何空点（无气）时，\n\
+                 整条链被提离棋盘。\n\n\
+                 · 落子先提对方——包围是武器\n\
+                 · 让自己无气的落子是禁着（自杀）\n\
+                 · 重现之前的整盘局面也是禁着（劫）\n\n\
+                 所以长墙需要「眼」（被自己围住的空点），\n\
+                 而对方的大链——可以猎杀。"
                     .to_string(),
                 Some("明白了 →"),
             ),
+            Step::WinRealm => (
+                "织成一个界域",
+                "现在完成目标：让一条链同时触到本界域的三条边。\n\
+                 织成的界域会「封印」——其中棋子永久不朽，\n\
+                 界域关闭，战火转移到其余两界。\n\n\
+                 注意 AI 也在织。挡它的每一颗子，\n\
+                 天然也是你自己 Y 的一部分——攻即是防。"
+                    .to_string(),
+                None,
+            ),
             Step::FinishGame => (
                 "终局",
-                "把这局下完：连通三个起源并挺过 AI 一回合（编织胜），\n\
-                 或者用剪刀绞杀它。\n\
-                 卡住时看 HUD 的最后一手播报，理解 AI 的意图。"
+                "拿下第二个界域就是胜利。\n\
+                 如果双方各占一界，第三界就是决战场——\n\
+                 每一手都在三个战场之间分配时间。"
                     .to_string(),
                 None,
             ),
             Step::Done => (
                 "教程完成",
                 match game.result() {
-                    Some(_) => "这一局结束了。规则只有落子和剪线两个动作，\n\
-                                但每一刀都在改写棋盘本身。\n\n\
-                                正式模式是「层层编织」：成网不结束游戏——\n\
-                                你的网会固化成世界的一部分，双方在被\n\
-                                改变的世界里织下一张网，先满 3 层者胜。\n\
-                                回到菜单，在 61×3 标准盘上试试。"
+                    Some(_) => "规则只有两条：Y 目标 + 死亡。\n\
+                                眼形、劫争、弃子、翻盘——全部从这两条涌现。\n\n\
+                                回到菜单，在完整尺寸的棋盘上试试，\n\
+                                或者看一场 AI 对弈演示。"
                         .to_string(),
                     None => String::new(),
                 },
@@ -222,9 +234,9 @@ impl TutorialState {
     /// Bot behavior for the current step.
     pub fn bot_mode(&self) -> BotMode {
         match self.step {
-            Step::Welcome | Step::Lifeline | Step::Done => BotMode::Paused,
-            Step::FirstStone | Step::CrossRealm | Step::UseScissors => BotMode::Gentle,
-            Step::FinishGame => BotMode::Full,
+            Step::Welcome | Step::Death | Step::Done => BotMode::Paused,
+            Step::FirstStone | Step::TouchTwoSides => BotMode::Gentle,
+            Step::WinRealm | Step::FinishGame => BotMode::Full,
         }
     }
 
@@ -233,76 +245,57 @@ impl TutorialState {
         let mut h = Hints::default();
         let bd = game.board();
         let st = game.state();
+        let side = Self::side(game);
+        let n = bd.node_count();
         match self.step {
-            Step::Welcome => {
-                // show your origins
-                h.nodes = bd.definition().origins_of(self.human);
-            }
-            Step::FirstStone => {
-                // empties adjacent to your origins
-                for &o in &bd.definition().origins_of(self.human) {
-                    h.nodes.push(o);
-                    for nb in bd.live_neighbors(o, &st.cut_edges) {
-                        if st.occupant(nb).is_none() {
-                            h.nodes.push(nb);
-                        }
+            Step::Welcome | Step::FirstStone => {
+                // pulse realm-0 interior (center play beats edge crawling)
+                for node in 0..(n / 3) as NodeId {
+                    if boardgen::trinity_sides(side, node) == 0 && st.occupant(node).is_none() {
+                        h.nodes.push(node);
                     }
                 }
             }
-            Step::CrossRealm => {
-                // gate endpoints in realms you haven't reached, plus the
-                // gate columns themselves
-                let mut reached = [false; 3];
-                for (n, occ) in st.occupancy.iter().enumerate() {
-                    if *occ == Some(self.human) {
-                        reached[bd.definition().nodes[n].realm as usize] = true;
+            Step::TouchTwoSides => {
+                // pulse empty side nodes of realms where the human has stones
+                let per = n / 3;
+                let mut realm_has_stones = [false; 3];
+                for m in 0..n as NodeId {
+                    if st.occupant(m) == Some(self.human) {
+                        realm_has_stones[m as usize / per] = true;
                     }
                 }
-                for (ei, e) in bd.definition().edges.iter().enumerate() {
-                    if e.kind == realmweave_core::EdgeKind::Portal
-                        && !st.cut_edges.contains(&(ei as u32))
+                for node in 0..n as NodeId {
+                    if realm_has_stones[node as usize / per]
+                        && boardgen::trinity_sides(side, node) != 0
+                        && st.occupant(node).is_none()
                     {
-                        h.edges.push(ei as u32);
-                        for node in [e.a, e.b] {
-                            let r = bd.definition().nodes[node as usize].realm as usize;
-                            if !reached[r] && st.occupant(node).is_none() {
-                                h.nodes.push(node);
-                            }
-                        }
+                        h.nodes.push(node);
                     }
                 }
             }
-            Step::UseScissors => {
-                // cuttable edges touching an AI stone
-                let opp = self.human.opponent();
-                for (ei, e) in bd.definition().edges.iter().enumerate() {
-                    let ei = ei as u32;
-                    if st.cut_edges.contains(&ei) {
-                        continue;
-                    }
-                    if (st.occupant(e.a) == Some(opp) || st.occupant(e.b) == Some(opp))
-                        && game.validate(&Move::CutEdge(ei)).is_ok()
-                    {
-                        h.edges.push(ei);
-                    }
-                }
-            }
-            Step::Lifeline | Step::FinishGame | Step::Done => {}
+            Step::WinRealm | Step::FinishGame | Step::Death | Step::Done => {}
         }
         h
     }
 
-    /// Steps count for the progress display (Done excluded).
+    /// Steps count for the progress display.
     pub fn progress(&self) -> (usize, usize) {
         let idx = match self.step {
             Step::Welcome => 0,
             Step::FirstStone => 1,
-            Step::CrossRealm => 2,
-            Step::UseScissors => 3,
-            Step::Lifeline => 4,
+            Step::TouchTwoSides => 2,
+            Step::Death => 3,
+            Step::WinRealm => 4,
             Step::FinishGame => 5,
             Step::Done => 6,
         };
         (idx, 6)
+    }
+}
+
+impl Default for TutorialState {
+    fn default() -> Self {
+        Self::new()
     }
 }

@@ -79,35 +79,59 @@ pub fn validate_board(definition: &BoardDefinition) -> Result<BoardGraph, Valida
     }
 
     // --- origins ---
+    // Side-goal boards (trinity: realm sides are the goals) legitimately
+    // have zero origins; realms are then intentionally disconnected from
+    // each other, so per-realm connectivity is checked instead.
+    let side_goal = def.origins.is_empty();
     let mut origin_nodes = HashSet::new();
     for origin in &def.origins {
         if !origin_nodes.insert(origin.node) {
             return Err(ValidationError::SharedOrigin(origin.node));
         }
     }
-    for player in [Player::Light, Player::Dark] {
-        let origins = def.origins_of(player);
-        if origins.len() != 3 {
-            return Err(ValidationError::BadOriginCount {
-                player,
-                count: origins.len(),
-            });
-        }
-        for realm in Realm::ALL {
-            if !origins.iter().any(|&n| graph.realm_of(n) == realm) {
-                return Err(ValidationError::MissingOriginRealm { player, realm });
+    if !side_goal {
+        for player in [Player::Light, Player::Dark] {
+            let origins = def.origins_of(player);
+            if origins.len() != 3 {
+                return Err(ValidationError::BadOriginCount {
+                    player,
+                    count: origins.len(),
+                });
+            }
+            for realm in Realm::ALL {
+                if !origins.iter().any(|&n| graph.realm_of(n) == realm) {
+                    return Err(ValidationError::MissingOriginRealm { player, realm });
+                }
             }
         }
     }
 
     // --- connectivity ---
-    let dist = graph.bfs_distances(0);
-    let unreached = dist.iter().filter(|d| d.is_none()).count();
-    if unreached > 0 {
-        return Err(ValidationError::Disconnected {
-            unreached,
-            total: graph.node_count(),
-        });
+    if side_goal {
+        // Each realm must be internally connected.
+        let per_realm = graph.node_count() / 3;
+        for realm in 0..3 {
+            let start = (realm * per_realm) as NodeId;
+            let dist = graph.bfs_distances(start);
+            let lo = realm * per_realm;
+            let hi = lo + per_realm;
+            let unreached = (lo..hi).filter(|&i| dist[i].is_none()).count();
+            if unreached > 0 {
+                return Err(ValidationError::Disconnected {
+                    unreached,
+                    total: per_realm,
+                });
+            }
+        }
+    } else {
+        let dist = graph.bfs_distances(0);
+        let unreached = dist.iter().filter(|d| d.is_none()).count();
+        if unreached > 0 {
+            return Err(ValidationError::Disconnected {
+                unreached,
+                total: graph.node_count(),
+            });
+        }
     }
 
     // --- realm equivalence ---
@@ -116,8 +140,10 @@ pub fn validate_board(definition: &BoardDefinition) -> Result<BoardGraph, Valida
     // --- symmetry automorphisms (hex boards with axial data) ---
     check_hex_symmetry(&graph)?;
 
-    // --- origin fairness ---
-    check_origin_fairness(&graph)?;
+    // --- origin fairness (origin boards only) ---
+    if !side_goal {
+        check_origin_fairness(&graph)?;
+    }
 
     Ok(graph)
 }
@@ -170,6 +196,28 @@ fn check_hex_symmetry(graph: &BoardGraph) -> Result<(), ValidationError> {
     let def = graph.definition();
     if def.nodes.iter().any(|n| n.axial.is_none()) {
         return Ok(()); // non-hex boards skip exact symmetry validation
+    }
+    // Triangle boards (side-goal, "triN-" ids) carry (row, col) coords, not
+    // hex axials: their symmetry group is the triangle's S3. Validate the
+    // left-right mirror (col -> row - col), which any fair triangle must
+    // admit; the 120° rotations need barycentric coords and are guaranteed
+    // by construction in the generator.
+    if def.id.starts_with("tri") {
+        let index = graph.axial_index();
+        let mut map = vec![0; graph.node_count()];
+        for node in &def.nodes {
+            let Some([r, c]) = node.axial else {
+                return Ok(());
+            };
+            let Some(target) = index.get(&(node.realm, [r, r - c])) else {
+                return Err(ValidationError::NotAutomorphism("triangle mirror"));
+            };
+            map[node.id as usize] = *target;
+        }
+        if !is_automorphism(graph, &map) {
+            return Err(ValidationError::NotAutomorphism("triangle mirror"));
+        }
+        return Ok(());
     }
     let index = graph.axial_index();
     let map_with = |f: fn([i32; 2]) -> [i32; 2]| -> Option<Vec<NodeId>> {

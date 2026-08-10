@@ -378,13 +378,16 @@ pub(crate) fn tutorial_panel(
             ui.add(egui::ProgressBar::new(idx as f32 / total as f32).desired_height(6.0));
             ui.add_space(8.0);
             ui.label(body);
-            // Live moment-teaching: provisional weave needs to survive a turn.
-            if let Some(p) = game.state().pending_weave {
+            // Live moment-teaching: the first capture, when it happens.
+            let caps = game.state().captures;
+            if caps != [0, 0] {
                 ui.add_space(6.0);
-                let msg = if p == tut.0.human {
-                    "🕸 你的编织已成形！挺过 AI 这一回合就获胜——它会拼命剪。"
+                let msg = if caps[0] > 0 && caps[1] == 0 {
+                    "☠ 你提掉了对方的子——无气之链离场。这就是死亡规则。"
+                } else if caps[1] > 0 && caps[0] == 0 {
+                    "☠ AI 提掉了你的子！被围死的链会整条消失——记得留气。"
                 } else {
-                    "🕸 AI 的编织成形了！这回合你必须剪断它的网，否则它获胜。"
+                    "☠ 双方都有提子——对杀已经开始。"
                 };
                 ui.colored_label(egui::Color32::LIGHT_YELLOW, msg);
             }

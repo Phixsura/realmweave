@@ -22,9 +22,13 @@ struct Cli {
 enum Command {
     /// Generate a standard three-realm hex board definition.
     GenBoard {
-        /// Nodes per realm: 19, 37, or 61.
+        /// Nodes per realm: 19, 37, 61, 91, or 127 (hex boards).
+        #[arg(long, conflicts_with = "trinity")]
+        size: Option<usize>,
+        /// Generate a trinity (triangular side-goal) board with this side
+        /// length instead of a hex board.
         #[arg(long)]
-        size: usize,
+        trinity: Option<usize>,
         /// Portal layout.
         #[arg(long, default_value = "inner6-outer6")]
         portals: String,
@@ -81,9 +85,32 @@ fn run(cli: Cli) -> Result<(), String> {
     match cli.command {
         Command::GenBoard {
             size,
+            trinity,
             portals,
             output,
         } => {
+            if let Some(side) = trinity {
+                let def = boardgen::generate_trinity(side)
+                    .ok_or_else(|| format!("unsupported trinity side {side}; use 4..=26"))?;
+                validate_board(&def)
+                    .map_err(|e| format!("generated board failed validation: {e}"))?;
+                let json = serde_json::to_string_pretty(&def).map_err(|e| e.to_string())?;
+                match output {
+                    Some(path) => {
+                        std::fs::write(&path, json + "\n")
+                            .map_err(|e| format!("{}: {e}", path.display()))?;
+                        eprintln!(
+                            "wrote {} ({} nodes, {} edges)",
+                            path.display(),
+                            def.nodes.len(),
+                            def.edges.len()
+                        );
+                    }
+                    None => println!("{json}"),
+                }
+                return Ok(());
+            }
+            let size = size.ok_or("provide --size (hex) or --trinity (triangle)")?;
             let spec = HexBoardSpec {
                 radius: match size {
                     19 => 2,
