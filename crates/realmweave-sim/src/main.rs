@@ -6,7 +6,6 @@ mod bots;
 mod fairness;
 mod mcts;
 mod stats;
-mod territory_bot;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -21,7 +20,6 @@ use realmweave_core::{
     validate_board, BoardDefinition, BoardGraph, Game, GameConfig, GameResult, Move, Player,
 };
 use stats::BatchStats;
-use territory_bot::TerritoryBot;
 
 #[derive(Parser)]
 #[command(
@@ -41,7 +39,7 @@ enum Command {
         board: PathBuf,
         #[arg(long, default_value_t = 100)]
         games: u32,
-        /// Bot for both sides: random | greedy | mcts | territory
+        /// Bot for both sides: random | greedy | mcts
         /// (override one side with --light-bot / --dark-bot).
         #[arg(long, default_value = "greedy")]
         bot: String,
@@ -59,7 +57,7 @@ enum Command {
         #[arg(long, default_value_t = 400)]
         playouts: u32,
         /// Ruleset id (three-realms-v1 | three-realms-doubleweave-v1 |
-        /// three-realms-sever-v1 | three-realms-territory-v1).
+        /// three-realms-sever-v1 | weave-sever-v2 | weave-layers-v3 | trinity-y-v4).
         #[arg(long, default_value = "three-realms-v1")]
         ruleset: String,
         /// Save the first game's record (replayable JSON) to this path.
@@ -119,13 +117,7 @@ fn make_bot(kind: &str, seed: u64, playouts: u32) -> Result<Box<dyn Bot>, String
             playouts,
             c: 1.2,
         })),
-        "territory" => Ok(Box::new(TerritoryBot {
-            rng: StdRng::seed_from_u64(seed),
-            reply_width: 8,
-        })),
-        other => Err(format!(
-            "unknown bot {other}; use random, greedy, mcts, or territory"
-        )),
+        other => Err(format!("unknown bot {other}; use random, greedy, or mcts")),
     }
 }
 

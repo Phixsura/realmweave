@@ -210,8 +210,6 @@ struct Palette {
     light_woven: Handle<StandardMaterial>,
     dark_woven: Handle<StandardMaterial>,
     last_move: Handle<StandardMaterial>,
-    light_territory: Handle<StandardMaterial>,
-    dark_territory: Handle<StandardMaterial>,
     /// Petrified world structure (weave-layers-v3), tinted by which
     /// player's weave fossilized there.
     petrified_light: Handle<StandardMaterial>,
@@ -467,8 +465,6 @@ fn sync_board_visuals(
             light_woven: materials.add(node_material(Color::srgb(1.0, 1.0, 0.9), 2.4)),
             dark_woven: materials.add(node_material(Color::srgb(1.0, 0.35, 0.25), 2.2)),
             last_move: materials.add(node_material(Color::srgb(0.3, 0.85, 1.0), 2.8)),
-            light_territory: materials.add(node_material(Color::srgb(0.75, 0.7, 0.5), 0.2)),
-            dark_territory: materials.add(node_material(Color::srgb(0.7, 0.3, 0.25), 0.2)),
             petrified_light: materials.add(node_material(Color::srgb(0.55, 0.52, 0.42), 0.0)),
             petrified_dark: materials.add(node_material(Color::srgb(0.45, 0.36, 0.36), 0.0)),
         };
@@ -577,22 +573,6 @@ fn sync_board_visuals(
         Default::default()
     };
     let last_placed = session.0.last_placed();
-    let supply_mode = game.config().ruleset_id.starts_with("three-realms-supply");
-    let (light_terr, dark_terr): (
-        std::collections::HashSet<NodeId>,
-        std::collections::HashSet<NodeId>,
-    ) = if supply_mode {
-        (
-            realmweave_core::supply_territory_nodes(board, state, Player::Light)
-                .into_iter()
-                .collect(),
-            realmweave_core::supply_territory_nodes(board, state, Player::Dark)
-                .into_iter()
-                .collect(),
-        )
-    } else {
-        Default::default()
-    };
 
     for (marker, mut transform, mut material, mut mesh) in &mut nodes {
         let id = marker.0;
@@ -625,8 +605,6 @@ fn sync_board_visuals(
             (Some(Player::Light), None) => &palette.light,
             (Some(Player::Dark), None) => &palette.dark,
             (None, _) if legal.contains(&id) => &palette.legal,
-            (None, _) if light_terr.contains(&id) => &palette.light_territory,
-            (None, _) if dark_terr.contains(&id) => &palette.dark_territory,
             (None, _) if gates.contains(&id) => &palette.gate,
             (None, _) => &palette.empty,
         };
@@ -1295,9 +1273,6 @@ fn menu_ui(mut commands: Commands, mut egui_ctx: EguiContexts, mut ui_state: Res
                     (realmweave_core::WEAVE_SEVER_V2, "weave&sever"),
                     (realmweave_core::THREE_REALMS_V1, "classic"),
                     (realmweave_core::SEVER_V1, "sever"),
-                    (realmweave_core::SUPPLY_V1, "supply"),
-                    (realmweave_core::SUPPLY_RANGE_V1, "supply-range"),
-                    (realmweave_core::TERRITORY_V1, "territory"),
                 ] {
                     ui.selectable_value(&mut ui_state.ruleset, id.to_string(), label);
                 }
@@ -1756,22 +1731,9 @@ fn game_hud(
             if let Some(err) = &s.last_error {
                 ui.colored_label(egui::Color32::LIGHT_RED, err);
             }
-            if s.game
-                .config()
-                .ruleset_id
-                .starts_with("three-realms-supply")
-            {
-                let l =
-                    realmweave_core::supply_score(s.game.board(), s.game.state(), Player::Light);
-                let d = realmweave_core::supply_score(s.game.board(), s.game.state(), Player::Dark);
-                ui.separator();
-                ui.label(format!(
-                    "score L {} : D {}  |  captures L:{} D:{}",
-                    l.display(),
-                    d.display(),
-                    s.game.state().captures[0],
-                    s.game.state().captures[1]
-                ));
+            let caps = s.game.state().captures;
+            if caps != [0, 0] {
+                ui.label(format!("提子 白{}:黑{}", caps[0], caps[1]));
             }
             if let Some(hovered) = view.hovered {
                 ui.separator();

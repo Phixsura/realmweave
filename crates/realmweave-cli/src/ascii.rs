@@ -71,16 +71,6 @@ pub fn render(game: &Game) -> String {
         out.push('\n');
     }
     out.push_str("legend: L/D stones, l/d origins, * empty gate, . empty\n");
-    if game.config().ruleset_id.starts_with("three-realms-supply") {
-        let l = realmweave_core::supply_score(board, state, Player::Light);
-        let d = realmweave_core::supply_score(board, state, Player::Dark);
-        out.push_str(&format!(
-            "score: Light {} (stones {} + territory {} + weave {}) | Dark {} (stones {} + territory {} + weave {} + komi {}.5) | captures L:{} D:{}\n",
-            l.display(), l.stones, l.territory, l.weave_bonus,
-            d.display(), d.stones, d.territory, d.weave_bonus, d.komi_half / 2,
-            state.captures[0], state.captures[1],
-        ));
-    }
     if game.config().ruleset_id == realmweave_core::WEAVE_SEVER_V2 {
         out.push_str(&format!(
             "scissors: Light {} | Dark {}   cut edges: {}\n",

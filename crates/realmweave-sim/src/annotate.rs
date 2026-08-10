@@ -2,7 +2,7 @@
 //! move changed: connection distances, captures, territory, weave status.
 //! Output is a sidecar JSON consumed by the client's replay viewer.
 
-use realmweave_core::{supply_score, BoardGraph, Game, GameConfig, Move, NodeId, Player, Realm};
+use realmweave_core::{BoardGraph, Game, GameConfig, Move, NodeId, Player, Realm};
 use serde::Serialize;
 
 #[derive(Serialize)]
@@ -89,14 +89,12 @@ pub fn annotate(board: BoardGraph, config: GameConfig, moves: &[Move]) -> Vec<An
         let them_before = connection_cost(&game, mover.opponent());
         let my_weave_before = game.has_realm_weave(mover);
         let caps_before = game.state().captures;
-        let my_terr_before = supply_score(game.board(), game.state(), mover).territory;
 
         game.play(*mv).expect("record replays");
 
         let me_after = connection_cost(&game, mover);
         let them_after = connection_cost(&game, mover.opponent());
         let caps_after = game.state().captures;
-        let my_terr_after = supply_score(game.board(), game.state(), mover).territory;
         let board_ref = game.board();
 
         let who = match mover {
@@ -117,10 +115,6 @@ pub fn annotate(board: BoardGraph, config: GameConfig, moves: &[Move]) -> Vec<An
                 let their_loss = them_after - them_before;
                 if their_loss > 0 {
                     parts.push(format!("同时把对方的连接路线逼远 {their_loss} 步"));
-                }
-                let terr_gain = my_terr_after - my_terr_before;
-                if terr_gain > 0 {
-                    parts.push(format!("围出 {terr_gain} 目新领地"));
                 }
                 if !my_weave_before && game.has_realm_weave(mover) {
                     parts.push("三起源贯通——编织完成，+10 目奖励到手".to_string());
@@ -151,15 +145,11 @@ pub fn annotate(board: BoardGraph, config: GameConfig, moves: &[Move]) -> Vec<An
             Move::Swap => "换边（pie rule）".to_string(),
             Move::Resign => "认输".to_string(),
         };
-        // Score line every 10 moves for orientation.
+        // Capture-count line every 10 moves for orientation.
         if (i + 1) % 10 == 0 {
-            let l = supply_score(game.board(), game.state(), Player::Light);
-            let d = supply_score(game.board(), game.state(), Player::Dark);
             text.push_str(&format!(
-                "　【第{}手比分：白 {} vs 黑 {}，提子 白{}:黑{}】",
+                "　【第{}手：提子 白{}:黑{}】",
                 i + 1,
-                l.display(),
-                d.display(),
                 game.state().captures[0],
                 game.state().captures[1]
             ));
