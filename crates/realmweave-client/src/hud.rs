@@ -126,7 +126,20 @@ pub(crate) fn game_hud(
             if charges != [0, 0] {
                 ui.label(format!("severs L:{} D:{}", charges[0], charges[1]));
             }
-            if s.game.config().ruleset_id == realmweave_core::TRIFORCE_V5 {
+            if view.review_cursor.is_some() {
+                ui.separator();
+                ui.colored_label(
+                    egui::Color32::YELLOW,
+                    format!(
+                        "复盘中：第 {}/{} 手（←/→ 步进，点棋谱返回）",
+                        view.review_cursor.unwrap_or(0),
+                        s.game.state().move_log.len()
+                    ),
+                );
+            }
+            if view.review_cursor.is_none()
+                && s.game.config().ruleset_id == realmweave_core::TRIFORCE_V5
+            {
                 use realmweave_core::rules::Triforce;
                 let (lw, ll) =
                     Triforce::weave_progress(s.game.board(), s.game.state(), Player::Light);
