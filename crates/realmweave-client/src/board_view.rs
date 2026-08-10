@@ -130,7 +130,7 @@ pub(crate) fn orbit_camera(
 
 // ----------------------------------------------------------- session set-up
 
-/// Keyboard shortcuts for local play: U = undo.
+/// Keyboard shortcuts for local play: U = undo; ←/→ = step review.
 pub(crate) fn shortcuts(
     keys: Res<ButtonInput<KeyCode>>,
     session: Option<Res<GameSession>>,
@@ -139,13 +139,29 @@ pub(crate) fn shortcuts(
 ) {
     let Some(session) = session else { return };
     let s = &session.0;
+    let total = s.game.state().move_log.len();
     if keys.just_pressed(KeyCode::KeyU)
         && matches!(s.connection, Connection::Local)
         && !matches!(s.control, Control::Observer | Control::BotDuel)
-        && !s.game.state().move_log.is_empty()
+        && total > 0
     {
         view.review_cursor = None;
         events.send(IntentEvent(PlayerIntent::Undo));
+    }
+    // Arrow keys drive the review cursor (opens the history panel too).
+    if total > 0 && keys.just_pressed(KeyCode::ArrowLeft) {
+        let cur = view.review_cursor.unwrap_or(total);
+        view.review_cursor = Some(cur.saturating_sub(1));
+        view.show_history = true;
+    }
+    if keys.just_pressed(KeyCode::ArrowRight) {
+        if let Some(cur) = view.review_cursor {
+            view.review_cursor = if cur + 1 >= total {
+                None
+            } else {
+                Some(cur + 1)
+            };
+        }
     }
 }
 
@@ -167,13 +183,14 @@ pub(crate) fn toggle_cut_mode(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 pub(crate) fn sync_board_visuals(
     mut commands: Commands,
     session: Res<GameSession>,
     view: Res<ViewSettings>,
     tut: Option<Res<Tutorial>>,
     time: Res<Time>,
+    mut camera: Query<(&mut OrbitCamera, &mut Transform), Without<NodeMarker>>,
     mut anim: Local<(u32, f32)>, // (ply we saw last, seconds since it changed)
     spawned: Option<Res<BoardSpawned>>,
     palette: Option<Res<Palette>>,
@@ -285,6 +302,18 @@ pub(crate) fn sync_board_visuals(
         commands.insert_resource(palette);
         commands.insert_resource(shapes);
         commands.insert_resource(BoardSpawned);
+        // Auto-frame the camera to the board's extent (hex-91 ≈ 11 world
+        // units of radius; triangles are narrower — a fixed distance either
+        // dwarfs small boards or crops large ones).
+        let max_r = board
+            .definition()
+            .nodes
+            .iter()
+            .map(|n| (n.position[0].powi(2) + n.position[2].powi(2)).sqrt())
+            .fold(0.0f32, f32::max);
+        for (mut orbit, _) in &mut camera {
+            orbit.distance = (max_r * 2.6).clamp(14.0, 40.0);
+        }
         return;
     }
     let Some(palette) = palette else { return };

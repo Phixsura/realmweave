@@ -120,6 +120,40 @@ pub(crate) fn gentle_bot_move(game: &Game, seed: u64) -> Option<Move> {
             anchors.push(n as NodeId);
         }
     }
+    // Trinity opening (no origins, no stones yet): a random legal empty AWAY
+    // from the human's stones — NEVER fall through to the full engine, the
+    // whole point of gentle mode is being a practice target.
+    if anchors.is_empty() {
+        let legal: Vec<NodeId> = game
+            .legal_moves()
+            .into_iter()
+            .filter_map(|m| match m {
+                Move::Place(n) => Some(n),
+                _ => None,
+            })
+            .collect();
+        if legal.is_empty() {
+            return Some(Move::Pass);
+        }
+        // farthest from any enemy stone (crude: maximize min graph distance)
+        let enemy: Vec<NodeId> = st.stones_of(me.opponent());
+        let pick = if enemy.is_empty() {
+            legal[(seed as usize) % legal.len()]
+        } else {
+            *legal
+                .iter()
+                .max_by_key(|&&n| {
+                    let d = bd.bfs_distances(n);
+                    enemy
+                        .iter()
+                        .map(|&e| d[e as usize].unwrap_or(0))
+                        .min()
+                        .unwrap_or(0)
+                })
+                .unwrap_or(&legal[0])
+        };
+        return Some(Move::Place(pick));
+    }
     let mut cands: Vec<NodeId> = Vec::new();
     for &a in &anchors {
         for nb in bd.live_neighbors(a, &st.cut_edges) {
@@ -131,7 +165,19 @@ pub(crate) fn gentle_bot_move(game: &Game, seed: u64) -> Option<Move> {
     cands.sort_unstable();
     cands.dedup();
     if cands.is_empty() {
-        return realmweave_bot::choose_move(game, seed);
+        // stay gentle: random legal placement, never the full engine
+        let legal: Vec<NodeId> = game
+            .legal_moves()
+            .into_iter()
+            .filter_map(|m| match m {
+                Move::Place(n) => Some(n),
+                _ => None,
+            })
+            .collect();
+        if legal.is_empty() {
+            return Some(Move::Pass);
+        }
+        return Some(Move::Place(legal[(seed as usize) % legal.len()]));
     }
     let pick = (seed as usize).wrapping_add(st.ply as usize * 7) % cands.len();
     Some(Move::Place(cands[pick]))

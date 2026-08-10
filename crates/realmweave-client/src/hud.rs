@@ -203,6 +203,12 @@ pub(crate) fn game_hud(
                 ui.separator();
                 ui.label(egui::RichText::new(text).italics());
             }
+            // Illegal-move feedback: suicide/ko/occupied reasons were being
+            // recorded and never shown.
+            if let Some(err) = &s.last_error {
+                ui.separator();
+                ui.colored_label(egui::Color32::LIGHT_RED, format!("✕ {err}"));
+            }
             if ui.button("leave").clicked() {
                 commands.remove_resource::<Tutorial>();
                 commands.remove_resource::<Duel>();
