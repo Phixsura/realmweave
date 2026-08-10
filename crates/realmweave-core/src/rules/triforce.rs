@@ -137,8 +137,13 @@ impl Triforce {
     }
 
     /// Apply a placement with Go dynamics. Returns captured count, or None
-    /// if the move is suicide (occ restored by caller convention: we only
-    /// mutate on success paths, so callers pass a scratch clone).
+    /// if the move is suicide.
+    ///
+    /// CONTRACT: on suicide (None) `occ` is left with the placed stone
+    /// removed, but captures — which cannot have occurred on a suicide
+    /// (capturing frees a liberty) — are asserted, not rolled back. Callers
+    /// today pass throwaway clones anyway; the assert keeps a future
+    /// in-place caller honest.
     fn place_with_capture(
         board: &BoardGraph,
         occ: &mut [Option<Player>],
@@ -165,6 +170,8 @@ impl Triforce {
         }
         let (_, alive) = Self::group_liberties(board, occ, node);
         if !alive {
+            debug_assert_eq!(captured, 0, "a capturing move always has a liberty");
+            occ[node as usize] = None;
             return None;
         }
         Some(captured)
@@ -283,9 +290,12 @@ impl RuleSet for Triforce {
             }
             _ => unreachable!("validated"),
         }
-        if let Some(winner) = Self::weaver(board, &next) {
+        // Only the mover can newly weave: captures remove opponent stones
+        // (which cannot connect the opponent's groups), and a pre-existing
+        // opponent Y would have ended the game on their turn.
+        if Self::weave_progress(board, &next, mover).0 == 3 {
             next.result = Some(GameResult::Win {
-                player: winner,
+                player: mover,
                 reason: WinReason::RealmWeave,
             });
         }

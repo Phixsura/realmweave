@@ -227,7 +227,7 @@ impl<'a> Sim<'a> {
         let mut stack = vec![node];
         let mut seen = vec![false; self.per_realm];
         seen[(node - lo) as usize] = true;
-        let mut touch = boardgen::trinity_sides(self.side, node);
+        let mut touch = self.sides_of(node);
         while let Some(cur) = stack.pop() {
             for &nb in self.board.neighbors(cur) {
                 if nb < lo || nb >= hi {
@@ -331,6 +331,9 @@ impl<'a> Sim<'a> {
                 }
                 if !found {
                     self.to_move = self.to_move.opponent();
+                    // Ko forbids only the IMMEDIATE recapture; an
+                    // intervening pass re-opens the point.
+                    self.ko_point = None;
                     passes += 1;
                     if passes >= 2 {
                         break;
@@ -433,7 +436,10 @@ pub fn choose_move_mcts(game: &Game, seed: u64, config: MctsConfig) -> Option<Mo
         let mut best_score = f64::MIN;
         for (i, s) in stats.iter().enumerate() {
             let score = if s.visits == 0 {
-                f64::MAX - i as f64 // visit unvisited first, in order
+                // Unvisited first, in index order. (Note: f64 cannot
+                // represent MAX - i distinctly; the strict `>` comparison
+                // is what keeps the FIRST unvisited child selected.)
+                f64::MAX
             } else {
                 s.wins / s.visits as f64
                     + config.c * ((total.max(1) as f64).ln() / s.visits as f64).sqrt()

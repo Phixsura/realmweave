@@ -13,10 +13,11 @@ use realmweave_core::Move;
 /// compute a move (blocking is fine at this bot's speed: <1s typical) after
 /// a short human-feeling delay.
 /// In-flight AI computation: worker thread + result channel, so MCTS never
-/// blocks a frame. Tagged with the ply it was computed FOR — a stale result
-/// (user left / game changed) is discarded.
+/// blocks a frame. Tagged with the POSITION HASH it was computed for — a
+/// stale result is discarded. (A ply tag is not enough: undo + a different
+/// human move can return to the same ply in a different position.)
 #[derive(Resource, Default)]
-pub(crate) struct BotTask(Option<(u32, crossbeam_channel::Receiver<Option<Move>>)>);
+pub(crate) struct BotTask(Option<(u64, crossbeam_channel::Receiver<Option<Move>>)>);
 
 pub(crate) fn bot_turn(
     time: Res<Time>,
@@ -49,9 +50,10 @@ pub(crate) fn bot_turn(
     }
 
     // Poll a computation in flight.
-    if let Some((for_ply, rx)) = &task.0 {
-        if *for_ply != s.game.state().ply {
-            task.0 = None; // stale (game changed under us)
+    let here = realmweave_core::rules::position_hash(s.game.state());
+    if let Some((for_pos, rx)) = &task.0 {
+        if *for_pos != here {
+            task.0 = None; // stale (game changed under us — incl. undo races)
         } else {
             match rx.try_recv() {
                 Ok(mv) => {
@@ -97,7 +99,7 @@ pub(crate) fn bot_turn(
         &s.game.state().move_log,
     )
     .expect("live game replays");
-    task.0 = Some((s.game.state().ply, rx));
+    task.0 = Some((here, rx));
     let playouts = budget.0;
     std::thread::spawn(move || {
         let mv = realmweave_bot::choose_move_with_budget(
@@ -185,13 +187,19 @@ pub(crate) fn gentle_bot_move(game: &Game, seed: u64) -> Option<Move> {
     Some(Move::Place(cands[pick]))
 }
 
+/// In-flight exhibition search (same stale-safety as BotTask).
+#[derive(Default)]
+pub(crate) struct DuelTask(Option<(u64, crossbeam_channel::Receiver<Option<Move>>)>);
+
 /// AI-vs-AI exhibition driver: play one move per `pace` seconds with
-/// narrated reasoning; start the next game when one ends.
+/// narrated reasoning; start the next game when one ends. The search runs
+/// off-thread — 600 playouts ≈ 180ms would otherwise hitch every move.
 pub(crate) fn duel_turn(
     time: Res<Time>,
     mut commands: Commands,
     duel: Option<ResMut<Duel>>,
     mut session: ResMut<GameSession>,
+    mut dtask: Local<DuelTask>,
 ) {
     let Some(mut duel) = duel else { return };
     let s = &mut session.0;
@@ -252,23 +260,52 @@ pub(crate) fn duel_turn(
     }
 
     let mover = s.game.to_move();
+    // Off-thread search with position-hash staleness (leave/new-game safe).
+    let here = realmweave_core::rules::position_hash(s.game.state());
+    let mv = match &dtask.0 {
+        Some((for_pos, rx)) if *for_pos == here => match rx.try_recv() {
+            Ok(mv) => {
+                dtask.0 = None;
+                mv.unwrap_or(realmweave_core::Move::Pass)
+            }
+            Err(crossbeam_channel::TryRecvError::Empty) => return, // still thinking
+            Err(crossbeam_channel::TryRecvError::Disconnected) => {
+                dtask.0 = None;
+                realmweave_core::Move::Pass
+            }
+        },
+        _ => {
+            // spawn a fresh search for THIS position
+            let seed = duel
+                .seed
+                .wrapping_add(duel.game_no as u64 * 0x9E37)
+                .wrapping_add(s.game.state().ply as u64);
+            let (tx, rx) = crossbeam_channel::bounded(1);
+            let game_copy = realmweave_core::Game::replay(
+                realmweave_core::BoardGraph::new(s.game.board().definition().clone())
+                    .expect("board round-trips"),
+                s.game.config().clone(),
+                &s.game.state().move_log,
+            )
+            .expect("live game replays");
+            dtask.0 = Some((here, rx));
+            std::thread::spawn(move || {
+                let mv = realmweave_bot::choose_move_with_budget(
+                    &game_copy,
+                    seed,
+                    realmweave_bot::mcts::MctsConfig {
+                        playouts: 600,
+                        c: 0.9,
+                    },
+                );
+                let _ = tx.send(mv);
+            });
+            return;
+        }
+    };
     // Health before the move, both sides, for narration.
     let my_before = realmweave_bot::link_cost(&s.game, mover);
     let opp_before = realmweave_bot::link_cost(&s.game, mover.opponent());
-    let seed = duel
-        .seed
-        .wrapping_add(duel.game_no as u64 * 0x9E37)
-        .wrapping_add(s.game.state().ply as u64);
-    // Exhibition budget: light enough to stay under the pacing interval.
-    let mv = realmweave_bot::choose_move_with_budget(
-        &s.game,
-        seed,
-        realmweave_bot::mcts::MctsConfig {
-            playouts: 600,
-            c: 0.9,
-        },
-    )
-    .unwrap_or(realmweave_core::Move::Pass);
     if s.game.play(mv).is_err() {
         let _ = s.game.play(realmweave_core::Move::Pass);
         return;
