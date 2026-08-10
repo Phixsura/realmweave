@@ -1,5 +1,6 @@
 //! Quick bot-vs-bot harness: geometry + outcome stats for tuning.
-use realmweave_core::{boardgen, bot, BoardGraph, Game, GameConfig, Move};
+use realmweave_bot as bot;
+use realmweave_core::{boardgen, BoardGraph, Game, GameConfig, Move};
 
 fn main() {
     let games: u32 = std::env::args()

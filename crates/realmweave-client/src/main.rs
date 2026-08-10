@@ -16,6 +16,7 @@ mod replay;
 mod replay_ui;
 mod session;
 mod steam;
+#[cfg(feature = "supplywar-lab")]
 mod supplywar_ui;
 mod tutorial;
 
@@ -37,6 +38,17 @@ use realmweave_core::{
 use realmweave_protocol::{ClientMessage, ServerMessage};
 use session::{Connection, Control, PlayerIntent, Session};
 
+#[cfg(feature = "supplywar-lab")]
+fn maybe_supplywar_plugin() -> supplywar_ui::SupplyWarPlugin {
+    supplywar_ui::SupplyWarPlugin
+}
+
+#[cfg(not(feature = "supplywar-lab"))]
+fn maybe_supplywar_plugin() -> impl Plugin {
+    // No-op plugin when the lab is compiled out.
+    |_: &mut App| {}
+}
+
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
@@ -50,7 +62,7 @@ fn main() {
         .add_plugins(MeshPickingPlugin)
         .add_plugins(EguiPlugin)
         .add_plugins(steam::SteamPlugin)
-        .add_plugins(supplywar_ui::SupplyWarPlugin)
+        .add_plugins(maybe_supplywar_plugin())
         .init_resource::<UiState>()
         .init_resource::<ViewSettings>()
         .add_event::<IntentEvent>()

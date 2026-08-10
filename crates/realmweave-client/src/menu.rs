@@ -4,6 +4,8 @@
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 
+#[cfg(feature = "supplywar-lab")]
+use crate::supplywar_ui;
 #[allow(unused_imports)]
 use crate::*;
 #[allow(unused_imports)]
@@ -15,8 +17,8 @@ pub(crate) fn menu_ui(
     mut ui_state: ResMut<UiState>,
 ) {
     let ctx = egui_ctx.ctx_mut();
-    // F1: launch Supply War with the demo AI at the wheel (used for
-    // hands-free demos and remote acceptance runs).
+    // F1: launch Supply War with the demo AI at the wheel (lab feature).
+    #[cfg(feature = "supplywar-lab")]
     if ctx.input(|i| i.key_pressed(egui::Key::F1)) {
         let mut sw = supplywar_ui::SwSession::new(20260809);
         sw.autopilot = true;
@@ -55,16 +57,19 @@ pub(crate) fn menu_ui(
             });
             ui.add_space(12.0);
 
-            ui.heading("Supply War (prototype)");
-            if ui
-                .button("⚡ 开始 Supply War")
-                .on_hover_text("供应线塔防灰盒原型：铺线、防御切割者、封闭裂隙")
-                .clicked()
+            #[cfg(feature = "supplywar-lab")]
             {
-                commands.insert_resource(supplywar_ui::SwSession::new(20260809));
-                commands.insert_resource(Active);
+                ui.heading("Supply War (prototype)");
+                if ui
+                    .button("⚡ 开始 Supply War")
+                    .on_hover_text("供应线塔防灰盒原型：铺线、防御切割者、封闭裂隙")
+                    .clicked()
+                {
+                    commands.insert_resource(supplywar_ui::SwSession::new(20260809));
+                    commands.insert_resource(Active);
+                }
+                ui.add_space(12.0);
             }
-            ui.add_space(12.0);
 
             ui.heading("Local");
             ui.horizontal(|ui| {
@@ -101,7 +106,7 @@ pub(crate) fn menu_ui(
                         None,
                     );
                 }
-                if realmweave_core::bot::supports(&ui_state.ruleset) {
+                if realmweave_bot::supports(&ui_state.ruleset) {
                     if ui.button("人机对战 (你执白先手)").clicked() {
                         start_hotseat(
                             &mut commands,
@@ -129,7 +134,7 @@ pub(crate) fn menu_ui(
             ui.small(
                 "玩法：连接你的三个起源=编织胜 · Tab 切剪线模式(✂×3) · 永久隔离对方起源=绞杀胜",
             );
-            if realmweave_core::bot::supports(&ui_state.ruleset)
+            if realmweave_bot::supports(&ui_state.ruleset)
                 && ui
                     .button("🤖 AI 对弈演示 (慢速讲解 3 局)")
                     .on_hover_text("两个 AI 慢速对弈，每手播报意图")

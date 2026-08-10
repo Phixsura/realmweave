@@ -4609,6 +4609,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "realmweave-bot"
+version = "0.1.0"
+dependencies = [
+ "realmweave-core",
+]
+
+[[package]]
 name = "realmweave-cli"
 version = "0.1.0"
 dependencies = [
@@ -4624,6 +4631,7 @@ dependencies = [
  "bevy",
  "bevy_egui",
  "crossbeam-channel",
+ "realmweave-bot",
  "realmweave-core",
  "realmweave-protocol",
  "realmweave-supplywar",

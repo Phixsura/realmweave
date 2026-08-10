@@ -6,10 +6,10 @@
 //! never plays illegal or pointless moves. Deterministic given (state,
 //! seed) so games remain replayable.
 
-use crate::board::BoardGraph;
-use crate::rules;
-use crate::state::{GameResult, Move};
-use crate::{Game, NodeId, Player};
+use realmweave_core::board::BoardGraph;
+use realmweave_core::rules;
+use realmweave_core::state::{GameResult, Move};
+use realmweave_core::{Game, NodeId, Player};
 
 /// Deterministic tie-break noise.
 fn noise(seed: u64, ply: u32, k: usize) -> f64 {
@@ -220,7 +220,7 @@ fn trinity_cost(game: &Game, player: Player) -> i64 {
                 // all three sides, so a naked edge line is the "cheapest" Y —
                 // and the weakest (Y wisdom: edge play loses to cutting).
                 // Charge rim cells extra so routes arc through the interior.
-                let sides = crate::boardgen::trinity_sides(side_len, node);
+                let sides = realmweave_core::boardgen::trinity_sides(side_len, node);
                 let edge_pen = if sides != 0 { 6 } else { 0 };
                 Some(4 + grain + edge_pen + 2 * enemy_adj.min(3))
             }
@@ -236,7 +236,7 @@ fn trinity_cost(game: &Game, player: Player) -> i64 {
             let mut dist = vec![i64::MAX; n];
             let mut heap = std::collections::BinaryHeap::new();
             for start in lo..hi {
-                if crate::boardgen::trinity_sides(side_len, start) & side_bit == 0 {
+                if realmweave_core::boardgen::trinity_sides(side_len, start) & side_bit == 0 {
                     continue;
                 }
                 let Some(c) = entry(start) else { continue };

@@ -44,7 +44,7 @@ pub(crate) fn bot_turn(
     let seed = 0xB07 ^ (s.game.state().ply as u64).wrapping_mul(2654435761);
     let mv = match mode {
         tutorial::BotMode::Gentle => gentle_bot_move(&s.game, seed),
-        _ => realmweave_core::bot::choose_move(&s.game, seed),
+        _ => realmweave_bot::choose_move(&s.game, seed),
     };
     if let Some(mv) = mv {
         let _ = s.game.play(mv);
@@ -78,7 +78,7 @@ pub(crate) fn gentle_bot_move(game: &Game, seed: u64) -> Option<Move> {
     cands.sort_unstable();
     cands.dedup();
     if cands.is_empty() {
-        return realmweave_core::bot::choose_move(game, seed);
+        return realmweave_bot::choose_move(game, seed);
     }
     let pick = (seed as usize).wrapping_add(st.ply as usize * 7) % cands.len();
     Some(Move::Place(cands[pick]))
@@ -149,20 +149,19 @@ pub(crate) fn duel_turn(
 
     let mover = s.game.to_move();
     // Health before the move, both sides, for narration.
-    let my_before = realmweave_core::bot::link_cost(&s.game, mover);
-    let opp_before = realmweave_core::bot::link_cost(&s.game, mover.opponent());
+    let my_before = realmweave_bot::link_cost(&s.game, mover);
+    let opp_before = realmweave_bot::link_cost(&s.game, mover.opponent());
     let seed = duel
         .seed
         .wrapping_add(duel.game_no as u64 * 0x9E37)
         .wrapping_add(s.game.state().ply as u64);
-    let mv =
-        realmweave_core::bot::choose_move(&s.game, seed).unwrap_or(realmweave_core::Move::Pass);
+    let mv = realmweave_bot::choose_move(&s.game, seed).unwrap_or(realmweave_core::Move::Pass);
     if s.game.play(mv).is_err() {
         let _ = s.game.play(realmweave_core::Move::Pass);
         return;
     }
-    let my_after = realmweave_core::bot::link_cost(&s.game, mover);
-    let opp_after = realmweave_core::bot::link_cost(&s.game, mover.opponent());
+    let my_after = realmweave_bot::link_cost(&s.game, mover);
+    let opp_after = realmweave_bot::link_cost(&s.game, mover.opponent());
     let mut line = s.last_move_text().unwrap_or_default();
     // Intent language, not raw numbers: classify by relative effect size.
     let d_mine = my_before - my_after; // + = my position improved

@@ -1,4 +1,5 @@
-use realmweave_core::{boardgen, bot, BoardGraph, Game, GameConfig, Move};
+use realmweave_bot as bot;
+use realmweave_core::{boardgen, BoardGraph, Game, GameConfig, Move};
 fn main() {
     let size: usize = std::env::args()
         .nth(1)

@@ -10,13 +10,16 @@ use realmweave_core::Move;
 
 pub(crate) fn setup_camera(mut commands: Commands) {
     // RW_AUTOSTART=supplywar[:demo] launches straight into Supply War
-    // (":demo" turns the autopilot on) — used for hands-free demos.
+    // (":demo" turns the autopilot on) — needs the supplywar-lab feature.
     if let Ok(v) = std::env::var("RW_AUTOSTART") {
         if v.starts_with("supplywar") {
-            let mut sw = supplywar_ui::SwSession::new(20260809);
-            sw.autopilot = v.ends_with(":demo");
-            commands.insert_resource(sw);
-            commands.insert_resource(Active);
+            #[cfg(feature = "supplywar-lab")]
+            {
+                let mut sw = supplywar_ui::SwSession::new(20260809);
+                sw.autopilot = v.ends_with(":demo");
+                commands.insert_resource(sw);
+                commands.insert_resource(Active);
+            }
         } else if let Some(rest) = v.strip_prefix("duel") {
             // RW_AUTOSTART=duel        → weave-layers-v3 exhibition
             // RW_AUTOSTART=duel:v4     → trinity-y-v4 exhibition
@@ -387,7 +390,7 @@ pub(crate) fn sync_board_visuals(
             (Player::Light, Color::srgba(1.0, 0.95, 0.5, 0.28)),
             (Player::Dark, Color::srgba(1.0, 0.35, 0.25, 0.28)),
         ] {
-            for n in realmweave_core::bot::best_routes(&session.0.game, player) {
+            for n in realmweave_bot::best_routes(&session.0.game, player) {
                 if state.occupant(n).is_none() {
                     let p = Vec3::from_array(layout::node_position(board, n, view.mode));
                     gizmos.sphere(Isometry3d::from_translation(p), 0.28, color);

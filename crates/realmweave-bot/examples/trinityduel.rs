@@ -1,6 +1,7 @@
 //! Trinity Y bot self-play: decisiveness, length, realm-lead changes.
+use realmweave_bot as bot;
 use realmweave_core::rules::TrinityY;
-use realmweave_core::{boardgen, bot, BoardGraph, Game, GameConfig};
+use realmweave_core::{boardgen, BoardGraph, Game, GameConfig};
 
 fn main() {
     let games: u32 = std::env::args()

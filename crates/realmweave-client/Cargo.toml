@@ -8,8 +8,9 @@ repository.workspace = true
 
 [dependencies]
 realmweave-core = { workspace = true }
+realmweave-bot = { workspace = true }
 realmweave-protocol = { workspace = true }
-realmweave-supplywar = { path = "../realmweave-supplywar" }
+realmweave-supplywar = { path = "../realmweave-supplywar", optional = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 bevy = "0.15"
@@ -22,3 +23,5 @@ steamworks = { version = "0.11", optional = true }
 # Steam integration (requires the Steamworks SDK at runtime; the client runs
 # fine without it). Enable with: cargo build -p realmweave-client --features steam
 steam = ["dep:steamworks"]
+# Archived Supply War prototype UI (docs/design-supply-war-v2.md).
+supplywar-lab = ["dep:realmweave-supplywar"]

@@ -2,12 +2,24 @@
 resolver = "2"
 members = [
     "crates/realmweave-core",
+    "crates/realmweave-bot",
     "crates/realmweave-protocol",
     "crates/realmweave-server",
     "crates/realmweave-sim",
     "crates/realmweave-client",
     "crates/realmweave-cli",
     "crates/realmweave-supplywar",
+]
+# `cargo build/test` covers the product path; the supplywar lab and its UI
+# stay opt-in (build with `--workspace`).
+default-members = [
+    "crates/realmweave-core",
+    "crates/realmweave-bot",
+    "crates/realmweave-protocol",
+    "crates/realmweave-server",
+    "crates/realmweave-sim",
+    "crates/realmweave-client",
+    "crates/realmweave-cli",
 ]
 
 [workspace.package]
@@ -18,6 +30,7 @@ repository = "https://github.com/Phixsura/realmweave"
 
 [workspace.dependencies]
 realmweave-core = { path = "crates/realmweave-core" }
+realmweave-bot = { path = "crates/realmweave-bot" }
 realmweave-protocol = { path = "crates/realmweave-protocol" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

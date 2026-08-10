@@ -1,6 +1,7 @@
 //! Straightness metric for trinity: longest straight chain of adjacent
 //! same-color stones along each triangular direction, final position.
-use realmweave_core::{boardgen, bot, BoardGraph, Game, GameConfig, Move, Player};
+use realmweave_bot as bot;
+use realmweave_core::{boardgen, BoardGraph, Game, GameConfig, Move, Player};
 
 fn main() {
     let side = 14usize;
