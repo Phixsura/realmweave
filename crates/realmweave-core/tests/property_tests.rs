@@ -1,6 +1,7 @@
 //! Property-based tests: replay equivalence, serialization round trips,
 //! move legality invariants, and occupancy invariants.
 
+#![allow(clippy::unwrap_used, clippy::expect_used)] // test/tooling code
 use proptest::prelude::*;
 use realmweave_core::board::BoardGraph;
 use realmweave_core::boardgen;

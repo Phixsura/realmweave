@@ -1,3 +1,5 @@
+//! Layer pacing measurement for weave-layers-v3 self-play.
+#![allow(clippy::unwrap_used, clippy::expect_used)] // test/tooling code
 use realmweave_bot as bot;
 use realmweave_core::{boardgen, BoardGraph, Game, GameConfig, Move};
 fn main() {

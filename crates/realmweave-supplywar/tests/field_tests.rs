@@ -1,6 +1,7 @@
 //! Field (SOC) simulation tests: determinism, commands, collapse physics,
 //! outcomes, and the strategy-leverage property from the experiments.
 
+#![allow(clippy::unwrap_used, clippy::expect_used)] // test/tooling code
 use realmweave_supplywar::field::{
     self, Command, FieldEvent, FieldState, LinkState, Outcome, COST_BUILD, CRITICAL, TICKS_PER_SEC,
 };

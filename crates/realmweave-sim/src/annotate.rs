@@ -2,6 +2,7 @@
 //! move changed: connection distances, captures, territory, weave status.
 //! Output is a sidecar JSON consumed by the client's replay viewer.
 
+#![allow(clippy::unwrap_used, clippy::expect_used)] // offline tooling: fail fast is correct
 use realmweave_core::{BoardGraph, Game, GameConfig, Move, NodeId, Player, Realm};
 use serde::Serialize;
 

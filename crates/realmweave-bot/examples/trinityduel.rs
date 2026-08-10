@@ -1,4 +1,5 @@
 //! Trinity Y bot self-play: decisiveness, length, realm-lead changes.
+#![allow(clippy::unwrap_used, clippy::expect_used)] // test/tooling code
 use realmweave_bot as bot;
 use realmweave_core::rules::TrinityY;
 use realmweave_core::{boardgen, BoardGraph, Game, GameConfig};

@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::board::{NodeId, Player};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+/// A single player action. Every ruleset consumes a subset of these.
 pub enum Move {
     /// Place a stone on an empty node.
     Place(NodeId),
@@ -20,24 +21,33 @@ pub enum Move {
     Pass,
     /// Pie rule: second player swaps sides instead of moving.
     Swap,
+    /// Concede the game.
     Resign,
 }
 
+/// Why a game was won.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum WinReason {
+    /// Confirmed Realm Weave (or realm majority in trinity/layers modes).
     RealmWeave,
     /// Opponent's origins can never be connected again (weave-sever-v2).
     Strangle,
     /// Higher territory score after the game closed (territory ruleset).
     Territory,
+    /// Opponent resigned.
     Resignation,
+    /// Opponent's clock ran out (server-adjudicated).
     Timeout,
 }
 
+/// Terminal outcome of a game.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum GameResult {
+    /// A player won.
     Win {
+        /// The winner.
         player: Player,
+        /// How they won.
         reason: WinReason,
     },
     /// Board full (or agreed) with no weave: drawn.
@@ -47,19 +57,24 @@ pub enum GameResult {
 /// Data-driven chess-style clock configuration.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TimeControl {
+    /// Initial bank per player, milliseconds.
     pub base_ms: u64,
+    /// Added after each of that player's moves, milliseconds.
     pub increment_ms: u64,
 }
 
 impl TimeControl {
+    /// ~30-minute games.
     pub const QUICK: TimeControl = TimeControl {
         base_ms: 12 * 60 * 1000,
         increment_ms: 5 * 1000,
     };
+    /// ~90-minute games.
     pub const STANDARD: TimeControl = TimeControl {
         base_ms: 40 * 60 * 1000,
         increment_ms: 15 * 1000,
     };
+    /// ~3-hour games.
     pub const GRAND: TimeControl = TimeControl {
         base_ms: 70 * 60 * 1000,
         increment_ms: 30 * 1000,
@@ -70,14 +85,19 @@ impl TimeControl {
 /// always know which evaluator produced them.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GameConfig {
+    /// Versioned ruleset id (see `rules::ALL_RULESETS`).
     pub ruleset_id: String,
+    /// Board definition id this game is played on.
     pub board_id: String,
+    /// Whether Dark may swap sides as its first response.
     pub pie_rule: bool,
+    /// Optional chess-style clock (server-enforced).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub time_control: Option<TimeControl>,
 }
 
 impl GameConfig {
+    /// Classic-ruleset config for the given board.
     pub fn new(board_id: impl Into<String>) -> Self {
         GameConfig {
             ruleset_id: crate::rules::THREE_REALMS_V1.to_string(),
@@ -87,16 +107,19 @@ impl GameConfig {
         }
     }
 
+    /// Toggle the pie rule.
     pub fn with_pie_rule(mut self, pie: bool) -> Self {
         self.pie_rule = pie;
         self
     }
 
+    /// Select a ruleset by versioned id.
     pub fn with_ruleset(mut self, ruleset_id: impl Into<String>) -> Self {
         self.ruleset_id = ruleset_id.into();
         self
     }
 
+    /// Attach a clock.
     pub fn with_time_control(mut self, tc: TimeControl) -> Self {
         self.time_control = Some(tc);
         self
@@ -106,14 +129,18 @@ impl GameConfig {
 /// Complete game state. Occupancy is indexed by dense `NodeId`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct GameState {
+    /// Board this state belongs to.
     pub board_id: String,
+    /// Stone (or None) per node, indexed by dense `NodeId`.
     pub occupancy: Vec<Option<Player>>,
+    /// Whose turn it is.
     pub to_move: Player,
     /// Full ordered move history.
     pub move_log: Vec<Move>,
     /// Player who completed a provisional Realm Weave and is waiting for it
     /// to survive the opponent's response turn.
     pub pending_weave: Option<Player>,
+    /// Terminal result once the game ends.
     pub result: Option<GameResult>,
     /// Whether the pie-rule swap has been consumed (or forfeited).
     pub swap_used: bool,
@@ -150,6 +177,7 @@ pub struct GameState {
 }
 
 impl GameState {
+    /// Empty starting state for a board of `node_count` nodes.
     pub fn new(board_id: impl Into<String>, node_count: usize) -> Self {
         GameState {
             board_id: board_id.into(),
@@ -171,6 +199,7 @@ impl GameState {
         }
     }
 
+    /// Stone at `node`, if any.
     pub fn occupant(&self, node: NodeId) -> Option<Player> {
         self.occupancy[node as usize]
     }
@@ -202,10 +231,12 @@ impl GameState {
         self.layers[owner_idx] >= self.layers[1 - owner_idx]
     }
 
+    /// Whether the game has ended.
     pub fn is_finished(&self) -> bool {
         self.result.is_some()
     }
 
+    /// All nodes currently holding `player`'s stones.
     pub fn stones_of(&self, player: Player) -> Vec<NodeId> {
         self.occupancy
             .iter()

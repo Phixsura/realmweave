@@ -4,6 +4,7 @@
 //! rollouts with a light connectivity bias. 183-node boards are small enough
 //! that this is fast at the playout counts we need for balance statistics.
 
+#![allow(clippy::unwrap_used, clippy::expect_used)] // offline tooling: fail fast is correct
 use rand::rngs::StdRng;
 use rand::seq::SliceRandom;
 use rand::Rng;

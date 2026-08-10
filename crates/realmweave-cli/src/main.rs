@@ -1,5 +1,6 @@
 //! Realmweave debug/replay/topology tooling and local two-player play.
 
+#![allow(clippy::unwrap_used, clippy::expect_used)] // offline tooling: fail fast is correct
 mod ascii;
 mod play;
 

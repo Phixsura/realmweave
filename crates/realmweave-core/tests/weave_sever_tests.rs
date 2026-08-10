@@ -1,6 +1,7 @@
 //! Weave & Sever v2 — the 10 edge cases from docs/design-weave-sever-v2.md §4
 //! plus scissors economy, strangle detection, and replay determinism.
 
+#![allow(clippy::unwrap_used, clippy::expect_used)] // test/tooling code
 use realmweave_core::board::BoardGraph;
 use realmweave_core::boardgen;
 use realmweave_core::rules::RuleError;

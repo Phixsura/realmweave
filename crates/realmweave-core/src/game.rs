@@ -7,12 +7,21 @@ use crate::board::{BoardGraph, NodeId, Player};
 use crate::rules::{self, RuleError, RuleSet};
 use crate::state::{GameConfig, GameResult, GameState, Move};
 
+/// Errors from [`Game`] operations.
 #[derive(Debug, thiserror::Error)]
 pub enum GameError {
+    /// The ruleset rejected a move.
     #[error(transparent)]
     Rule(#[from] RuleError),
+    /// Config and board graph disagree about the board id.
     #[error("board id mismatch: config wants {expected}, graph is {actual}")]
-    BoardMismatch { expected: String, actual: String },
+    BoardMismatch {
+        /// Board id the config asked for.
+        expected: String,
+        /// Board id the graph actually has.
+        actual: String,
+    },
+    /// `undo` with an empty history.
     #[error("nothing to undo")]
     NothingToUndo,
 }
@@ -21,12 +30,16 @@ pub enum GameError {
 /// reconstructed exactly. This is the persistence/replay format.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct GameRecord {
+    /// Match configuration (ruleset id, board id, options).
     pub config: GameConfig,
+    /// Ordered move log.
     pub moves: Vec<Move>,
+    /// Result, if the game ended.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub result: Option<GameResult>,
 }
 
+/// A live game: board + ruleset + state, with undo history.
 pub struct Game {
     board: BoardGraph,
     ruleset: Box<dyn RuleSet>,
@@ -37,6 +50,8 @@ pub struct Game {
 }
 
 impl Game {
+    /// Start a fresh game; origins are pre-placed and the ruleset's
+    /// `setup` is applied.
     pub fn new(board: BoardGraph, config: GameConfig) -> Result<Self, GameError> {
         if board.definition().id != config.board_id {
             return Err(GameError::BoardMismatch {
@@ -61,30 +76,37 @@ impl Game {
         })
     }
 
+    /// The board graph.
     pub fn board(&self) -> &BoardGraph {
         &self.board
     }
 
+    /// The match configuration.
     pub fn config(&self) -> &GameConfig {
         &self.config
     }
 
+    /// Current state snapshot.
     pub fn state(&self) -> &GameState {
         &self.state
     }
 
+    /// Whose turn it is.
     pub fn to_move(&self) -> Player {
         self.state.to_move
     }
 
+    /// Terminal result, if the game has ended.
     pub fn result(&self) -> Option<GameResult> {
         self.ruleset.evaluate(&self.board, &self.state)
     }
 
+    /// All currently legal moves.
     pub fn legal_moves(&self) -> Vec<Move> {
         self.ruleset.legal_moves(&self.board, &self.state)
     }
 
+    /// Check one move without applying it.
     pub fn validate(&self, mv: &Move) -> Result<(), RuleError> {
         self.ruleset.validate_move(&self.board, &self.state, mv)
     }
@@ -108,14 +130,17 @@ impl Game {
         Ok(&self.state)
     }
 
+    /// `player`'s connected component containing `start` (UI helper).
     pub fn connected_component(&self, player: Player, start: NodeId) -> Vec<NodeId> {
         rules::connected_component(&self.board, &self.state, player, start)
     }
 
+    /// All of `player`'s connected components (UI helper).
     pub fn player_components(&self, player: Player) -> Vec<Vec<NodeId>> {
         rules::player_components(&self.board, &self.state, player)
     }
 
+    /// Whether `player` currently has a full-graph realm weave.
     pub fn has_realm_weave(&self, player: Player) -> bool {
         rules::has_realm_weave(&self.board, &self.state, player)
     }

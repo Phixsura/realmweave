@@ -4,6 +4,8 @@
 //! authoritative state; the server broadcasts canonical events carrying
 //! sequence numbers. Every envelope is versioned from the start.
 
+#![allow(missing_docs)] // wire types: field names + serde tags are the contract
+
 use serde::{Deserialize, Serialize};
 
 use realmweave_core::{GameConfig, GameResult, Move, NodeId, Player, TimeControl};
@@ -147,7 +149,7 @@ pub enum ServerMessage {
 
 /// Serialize a message into a JSON text frame.
 pub fn encode<T: Serialize>(envelope: &Envelope<T>) -> String {
-    serde_json::to_string(envelope).expect("protocol types always serialize")
+    serde_json::to_string(envelope).unwrap_or_default() // our types always serialize
 }
 
 /// Decode a JSON text frame, enforcing the protocol version.

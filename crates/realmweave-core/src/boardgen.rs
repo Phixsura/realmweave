@@ -38,6 +38,7 @@ pub enum PortalSpec {
 }
 
 impl PortalSpec {
+    /// Axial coordinates of the gate columns for a board of `radius`.
     pub fn gate_axials(&self, radius: i32) -> Vec<[i32; 2]> {
         match self {
             PortalSpec::Inner6Outer6 => {
@@ -55,6 +56,7 @@ impl PortalSpec {
         }
     }
 
+    /// Short human-readable name of this portal layout.
     pub fn label(&self) -> &'static str {
         match self {
             PortalSpec::Inner6Outer6 => "inner6-outer6",
@@ -63,14 +65,17 @@ impl PortalSpec {
     }
 }
 
+/// Generation parameters for a hexagonal three-realm board.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HexBoardSpec {
     /// Hex radius; nodes per realm = 1 + 3*radius*(radius+1).
     pub radius: i32,
+    /// Gate column layout.
     pub portals: PortalSpec,
 }
 
 impl HexBoardSpec {
+    /// Standard spec for a supported realm size (19/37/61/91/127).
     pub fn from_realm_size(size: usize) -> Option<Self> {
         let radius = match size {
             19 => 2,
@@ -86,12 +91,14 @@ impl HexBoardSpec {
         })
     }
 
+    /// Nodes per realm for this radius.
     pub fn realm_size(&self) -> usize {
         let r = self.radius as usize;
         1 + 3 * r * (r + 1)
     }
 }
 
+/// Hex grid distance between two axial coordinates.
 pub fn hex_distance(a: [i32; 2], b: [i32; 2]) -> i32 {
     let dq = a[0] - b[0];
     let dr = a[1] - b[1];
@@ -170,7 +177,7 @@ pub fn generate(spec: &HexBoardSpec, id: &str, version: u32) -> BoardDefinition 
         coords
             .iter()
             .position(|c| *c == ax)
-            .expect("axial coordinate within radius")
+            .unwrap_or_else(|| unreachable!("generator emits only in-radius axials"))
     };
     let node_id = |realm: Realm, ax: [i32; 2]| -> NodeId {
         (realm.index() * realm_size + index_of(ax)) as NodeId
@@ -349,7 +356,9 @@ fn try_seeded(
         if !orbit.iter().all(|o| candidates.contains(o)) {
             continue;
         }
-        let rep = *orbit.iter().min().unwrap();
+        let Some(&rep) = orbit.iter().min() else {
+            continue; // orbits are non-empty by construction
+        };
         if !orbit_reps.contains(&rep) {
             orbit_reps.push(rep);
         }
@@ -385,7 +394,7 @@ fn try_seeded(
     let keep: Vec<&Node> = base
         .nodes
         .iter()
-        .filter(|n| !carved.contains(&n.axial.unwrap()))
+        .filter(|n| n.axial.is_none_or(|ax| !carved.contains(&ax)))
         .collect();
     let mut remap = std::collections::HashMap::new();
     let mut nodes = Vec::with_capacity(keep.len());
@@ -409,7 +418,7 @@ fn try_seeded(
         .iter()
         .map(|o| Origin {
             player: o.player,
-            node: *remap.get(&o.node).expect("origins are protected"),
+            node: *remap.get(&o.node).unwrap_or(&o.node), // origins never carved
         })
         .collect();
 

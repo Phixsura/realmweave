@@ -6,10 +6,18 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[lints]
+workspace = true
+
 [dependencies]
 serde = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
+criterion = { version = "0.5", default-features = false }
 serde_json = { workspace = true }
 proptest = "1"
+
+[[bench]]
+name = "engine"
+harness = false

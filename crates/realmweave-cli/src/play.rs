@@ -1,5 +1,6 @@
 //! Interactive local two-player terminal game.
 
+#![allow(clippy::unwrap_used, clippy::expect_used)] // offline tooling: fail fast is correct
 use std::io::{BufRead, Write};
 
 use realmweave_core::{BoardGraph, Game, GameConfig, Move, NodeId, Realm};

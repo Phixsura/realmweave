@@ -28,6 +28,7 @@ use super::*;
 /// groups can be hunted). Everything else — eyes, ladders, ko fights,
 /// sacrifices, invasions of "finished" territory — must emerge.
 pub struct TrinityY {
+    /// Whether Dark may swap as its first response.
     pub pie_rule: bool,
 }
 
@@ -114,7 +115,9 @@ impl TrinityY {
         occ: &[Option<Player>],
         start: NodeId,
     ) -> (Vec<NodeId>, bool) {
-        let player = occ[start as usize].expect("group start occupied");
+        let Some(player) = occ[start as usize] else {
+            return (Vec::new(), true); // callers pass occupied starts
+        };
         let mut members = vec![start];
         let mut visited = vec![false; board.node_count()];
         visited[start as usize] = true;
@@ -306,9 +309,10 @@ impl RuleSet for TrinityY {
             }
             Move::Place(node) => {
                 let sealed = Self::sealed_realms(board, state);
+                // Suicide was rejected by validate_move above.
                 let captured =
                     Self::place_with_capture(board, &mut next.occupancy, &sealed, *node, mover)
-                        .expect("validated: not suicide");
+                        .unwrap_or(0);
                 next.captures[player_index(mover)] += captured;
                 next.consecutive_passes = 0;
                 next.position_hashes.push(position_hash(&next));

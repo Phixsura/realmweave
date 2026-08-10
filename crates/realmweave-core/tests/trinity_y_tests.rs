@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used, clippy::expect_used)] // test/tooling code
 #![allow(clippy::needless_range_loop)]
 //! Trinity Y (v4): the Y theorem in play — decisiveness, realm scoring,
 //! match win, replay determinism.

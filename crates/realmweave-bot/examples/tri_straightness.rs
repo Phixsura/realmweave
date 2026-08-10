@@ -1,5 +1,6 @@
 //! Straightness metric for trinity: longest straight chain of adjacent
 //! same-color stones along each triangular direction, final position.
+#![allow(clippy::unwrap_used, clippy::expect_used)] // test/tooling code
 use realmweave_bot as bot;
 use realmweave_core::{boardgen, BoardGraph, Game, GameConfig, Move, Player};
 

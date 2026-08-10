@@ -9,33 +9,49 @@ use realmweave_core::{Game, GameResult, Move, Player, TimeControl, WinReason};
 use realmweave_protocol::{ClockState, GameSnapshot, MoveEvent, ServerMessage};
 use tokio::sync::mpsc;
 
+/// Per-seat outbound message channel.
 pub type Tx = mpsc::UnboundedSender<ServerMessage>;
 
+/// One player's seat: reconnect token + live channel (None = disconnected).
 pub struct Seat {
+    /// Reconnect token for this seat.
     pub token: String,
+    /// Outbound channel while connected.
     pub tx: Option<Tx>,
 }
 
+/// One live match: two seats, one authoritative game, server clocks.
 pub struct Room {
+    /// Public room code.
     pub id: String,
+    /// Persistent game id (storage key).
     pub game_id: String,
+    /// The authoritative game.
     pub game: Game,
+    /// Clock settings, if any.
     pub time_control: Option<TimeControl>,
+    /// Light's remaining bank, ms.
     pub light_ms: u64,
+    /// Dark's remaining bank, ms.
     pub dark_ms: u64,
     /// When the running clock started counting, if the game is live.
     pub turn_started: Option<Instant>,
+    /// Light seat (room creator).
     pub light: Seat,
+    /// Dark seat once someone joins.
     pub dark: Option<Seat>,
     /// Canonical room event counter.
     pub event_seq: u64,
+    /// Both seats filled and play begun.
     pub started: bool,
+    /// Game over (engine result or override).
     pub finished: bool,
     /// Result decided outside the rules engine (timeout).
     pub result_override: Option<GameResult>,
 }
 
 impl Room {
+    /// Fresh room with Light seated.
     pub fn new(id: String, game_id: String, game: Game, light_token: String) -> Self {
         let time_control = game.config().time_control;
         let base = time_control.map(|tc| tc.base_ms).unwrap_or(0);
@@ -64,11 +80,13 @@ impl Room {
         self.game.result().or(self.result_override)
     }
 
+    /// Allocate the next canonical event number.
     pub fn next_seq(&mut self) -> u64 {
         self.event_seq += 1;
         self.event_seq
     }
 
+    /// Which seat a reconnect token belongs to.
     pub fn seat_of_token(&self, token: &str) -> Option<Player> {
         if self.light.token == token {
             return Some(Player::Light);
@@ -81,6 +99,7 @@ impl Room {
         None
     }
 
+    /// Mutable seat access.
     pub fn seat_mut(&mut self, player: Player) -> Option<&mut Seat> {
         match player {
             Player::Light => Some(&mut self.light),
@@ -88,6 +107,7 @@ impl Room {
         }
     }
 
+    /// Send to one seat if connected (silently drops otherwise).
     pub fn send_to(&self, player: Player, msg: ServerMessage) {
         let seat = match player {
             Player::Light => Some(&self.light),
@@ -98,6 +118,7 @@ impl Room {
         }
     }
 
+    /// Send to both seats.
     pub fn broadcast(&self, msg: ServerMessage) {
         self.send_to(Player::Light, msg.clone());
         self.send_to(Player::Dark, msg);
@@ -156,6 +177,7 @@ impl Room {
         (clock.remaining(mover) == 0).then_some(mover)
     }
 
+    /// Full state snapshot for (re)joining clients.
     pub fn snapshot_for(&self, seat: Player) -> GameSnapshot {
         let opponent_connected = match seat.opponent() {
             Player::Light => self.light.tx.is_some(),
@@ -172,6 +194,7 @@ impl Room {
         }
     }
 
+    /// Start the match once both seats are filled. Returns true on start.
     pub fn start_if_ready(&mut self) -> bool {
         if !self.started && self.dark.is_some() {
             self.started = true;

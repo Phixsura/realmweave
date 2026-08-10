@@ -20,13 +20,17 @@ pub use weave_sever::WeaveSeverV2;
 use crate::board::{BoardGraph, NodeId, Player};
 use crate::state::{GameResult, GameState, Move};
 
+/// Classic weave race (docs/rules.md).
 pub const THREE_REALMS_V1: &str = "three-realms-v1";
+/// Classic + stone-removal charges.
 pub const SEVER_V1: &str = "three-realms-sever-v1";
+/// Scissors edge-cutting + strangle (docs/design-weave-sever-v2.md).
 pub const WEAVE_SEVER_V2: &str = "weave-sever-v2";
+/// Petrifying layer scoring (docs/design-weave-layers-v3.md).
 pub const WEAVE_LAYERS_V3: &str = "weave-layers-v3";
+/// Flagship: Y goal + liberties (docs/design-trinity-y-v4.md).
 pub const TRINITY_Y_V4: &str = "trinity-y-v4";
 
-/// Weave bonus added to the largest-network score in the territory variant.
 /// Sever charges per player in the sever variant.
 pub const SEVER_CHARGES: u8 = 3;
 /// Scissors per player in weave-sever-v2. Origin-adjacent edges are
@@ -44,7 +48,9 @@ pub const LAYERS_TO_WIN: u8 = 3;
 /// and fallback scoring (layers first) decides. Keeps marathons bounded.
 pub const V3_PLY_CAP: u32 = 500;
 
+/// A move rejected by a ruleset. Variant messages are self-describing.
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
+#[allow(missing_docs)] // each variant's #[error] text IS its documentation
 pub enum RuleError {
     #[error("game is already finished")]
     GameFinished,
@@ -76,24 +82,30 @@ pub enum RuleError {
     UnknownRuleset(String),
 }
 
+/// A versioned rule implementation. The engine, server, client, and sim
+/// all consume rules exclusively through this trait.
 pub trait RuleSet: Send + Sync {
     /// Stable versioned identifier persisted with every game.
     fn id(&self) -> &str;
     /// One-time state initialization (e.g. sever charges).
     fn setup(&self, _state: &mut GameState) {}
+    /// Every legal move in the current position.
     fn legal_moves(&self, board: &BoardGraph, state: &GameState) -> Vec<Move>;
+    /// Check a single move without applying it.
     fn validate_move(
         &self,
         board: &BoardGraph,
         state: &GameState,
         mv: &Move,
     ) -> Result<(), RuleError>;
+    /// Apply a validated move, producing the next state.
     fn apply_move(
         &self,
         board: &BoardGraph,
         state: &GameState,
         mv: &Move,
     ) -> Result<GameState, RuleError>;
+    /// Terminal result, if the game has ended.
     fn evaluate(&self, board: &BoardGraph, state: &GameState) -> Option<GameResult>;
 }
 

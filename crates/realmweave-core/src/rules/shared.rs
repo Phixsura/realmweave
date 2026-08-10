@@ -6,6 +6,8 @@ use std::collections::VecDeque;
 use crate::board::{BoardGraph, NodeId, Player};
 use crate::state::GameState;
 
+/// Whether all of `player`'s origins can still be joined through own
+/// stones + empty nodes over the live graph (enemy stones block).
 pub fn potential_connected(board: &BoardGraph, state: &GameState, player: Player) -> bool {
     potential_origin_groups(board, state, player) == 1
 }
@@ -136,6 +138,7 @@ pub fn position_hash(state: &GameState) -> u64 {
     h.finish()
 }
 
+/// `player`'s connected component (sorted) containing `start`.
 pub fn connected_component(
     board: &BoardGraph,
     state: &GameState,
@@ -287,7 +290,9 @@ fn vertex_disjoint_routes(
         // Augment by 1.
         let mut v = sink;
         while v != source {
-            let (u, ei) = prev[v].expect("path");
+            let Some((u, ei)) = prev[v] else {
+                break; // reconstructed path always has predecessors
+            };
             let rev = graph[u][ei].2;
             graph[u][ei].1 -= 1;
             graph[v][rev].1 += 1;

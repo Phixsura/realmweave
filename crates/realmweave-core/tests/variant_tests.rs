@@ -1,5 +1,6 @@
 //! Tests for the doubleweave, sever, and territory rule variants.
 
+#![allow(clippy::unwrap_used, clippy::expect_used)] // test/tooling code
 use realmweave_core::board::BoardGraph;
 use realmweave_core::boardgen;
 use realmweave_core::rules::RuleError;

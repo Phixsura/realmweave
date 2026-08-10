@@ -1,5 +1,6 @@
 //! Realmweave authoritative online server binary.
 
+#![allow(clippy::expect_used)] // binary entrypoint: fail fast at startup
 use std::sync::Arc;
 
 use clap::Parser;

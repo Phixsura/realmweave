@@ -20,11 +20,13 @@ use super::*;
 ///   otherwise draw.
 pub struct WeaveRules {
     id: &'static str,
+    /// Whether Dark may swap as its first response.
     pub pie_rule: bool,
     sever_charges: u8,
 }
 
 impl WeaveRules {
+    /// three-realms-v1: the original weave race.
     pub fn classic(pie_rule: bool) -> Self {
         WeaveRules {
             id: THREE_REALMS_V1,
@@ -33,6 +35,7 @@ impl WeaveRules {
         }
     }
 
+    /// three-realms-sever-v1: weave race + stone-removal charges.
     pub fn sever(pie_rule: bool) -> Self {
         WeaveRules {
             id: SEVER_V1,

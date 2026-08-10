@@ -1,5 +1,6 @@
 //! Board generation, graph construction, and validation tests.
 
+#![allow(clippy::unwrap_used, clippy::expect_used)] // test/tooling code
 use realmweave_core::board::{BoardGraph, Edge, EdgeKind, Node, Origin};
 use realmweave_core::boardgen::{self, HexBoardSpec, PortalSpec};
 use realmweave_core::validate::{degree_histogram, validate_board, ValidationError};

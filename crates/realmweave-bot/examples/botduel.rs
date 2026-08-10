@@ -1,4 +1,5 @@
 //! Quick bot-vs-bot harness: geometry + outcome stats for tuning.
+#![allow(clippy::unwrap_used, clippy::expect_used)] // test/tooling code
 use realmweave_bot as bot;
 use realmweave_core::{boardgen, BoardGraph, Game, GameConfig, Move};
 

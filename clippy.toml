@@ -1,0 +1,4 @@
+# unwrap/expect are idiomatic in tests and benches; the deny applies to
+# production code paths only.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true

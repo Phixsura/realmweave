@@ -6,5 +6,8 @@ license.workspace = true
 repository.workspace = true
 description = "Baseline AI opponents for Realmweave rulesets (2-ply eval search)"
 
+[lints]
+workspace = true
+
 [dependencies]
 realmweave-core = { workspace = true }

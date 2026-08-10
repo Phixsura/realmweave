@@ -7,18 +7,25 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
+/// Dense node identifier: always `0..node_count` within a board.
 pub type NodeId = u16;
 
+/// One of the three stacked realms of a Realmweave board.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Realm {
+    /// Top layer.
     Heaven,
+    /// Middle layer.
     Mortal,
+    /// Bottom layer.
     Underworld,
 }
 
 impl Realm {
+    /// All realms in layer order (top to bottom).
     pub const ALL: [Realm; 3] = [Realm::Heaven, Realm::Mortal, Realm::Underworld];
 
+    /// Layer index (0 = Heaven, 1 = Mortal, 2 = Underworld).
     pub fn index(self) -> usize {
         match self {
             Realm::Heaven => 0,
@@ -27,6 +34,7 @@ impl Realm {
         }
     }
 
+    /// Inverse of [`Realm::index`].
     pub fn from_index(i: usize) -> Option<Realm> {
         Realm::ALL.get(i).copied()
     }
@@ -37,6 +45,7 @@ impl Realm {
         d == 1
     }
 
+    /// English display name.
     pub fn name(self) -> &'static str {
         match self {
             Realm::Heaven => "Heaven",
@@ -46,13 +55,17 @@ impl Realm {
     }
 }
 
+/// The two players. Light always moves first.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Player {
+    /// First player.
     Light,
+    /// Second player.
     Dark,
 }
 
 impl Player {
+    /// The other player.
     pub fn opponent(self) -> Player {
         match self {
             Player::Light => Player::Dark,
@@ -60,6 +73,7 @@ impl Player {
         }
     }
 
+    /// English display name.
     pub fn name(self) -> &'static str {
         match self {
             Player::Light => "Light",
@@ -68,9 +82,12 @@ impl Player {
     }
 }
 
+/// One vertex of the board graph.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Node {
+    /// Dense id (`0..node_count`).
     pub id: NodeId,
+    /// Which realm this node belongs to.
     pub realm: Realm,
     /// Default layout hint (x, layer-y, z). Never used for legality.
     pub position: [f32; 3],
@@ -80,16 +97,23 @@ pub struct Node {
     pub axial: Option<[i32; 2]>,
 }
 
+/// Whether an edge stays within a realm or crosses between realms.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum EdgeKind {
+    /// Connects two nodes of the same realm.
     IntraRealm,
+    /// Gate column segment linking adjacent realms.
     Portal,
 }
 
+/// Undirected edge of the board graph.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Edge {
+    /// One endpoint.
     pub a: NodeId,
+    /// The other endpoint.
     pub b: NodeId,
+    /// Intra-realm or portal.
     pub kind: EdgeKind,
 }
 
@@ -104,28 +128,37 @@ impl Edge {
     }
 }
 
+/// A player's origin node (pre-occupied, immovable; one per realm).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Origin {
+    /// Owner of this origin.
     pub player: Player,
+    /// The origin's node.
     pub node: NodeId,
 }
 
+/// A complete board as data: the unit of persistence and validation.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BoardDefinition {
     /// Stable identifier, e.g. "hex37-v1".
     pub id: String,
     /// Schema/content version of this board definition.
     pub version: u32,
+    /// All vertices, ids dense `0..len`.
     pub nodes: Vec<Node>,
+    /// All undirected edges.
     pub edges: Vec<Edge>,
+    /// Both players' origins (may be empty for side-goal boards).
     pub origins: Vec<Origin>,
 }
 
 impl BoardDefinition {
+    /// Number of nodes.
     pub fn node_count(&self) -> usize {
         self.nodes.len()
     }
 
+    /// The given player's origin nodes.
     pub fn origins_of(&self, player: Player) -> Vec<NodeId> {
         self.origins
             .iter()
@@ -158,7 +191,9 @@ pub struct BoardGraph {
     realm_of: Vec<Realm>,
 }
 
+/// Structural errors detected when building a [`BoardGraph`].
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
+#[allow(missing_docs)] // each variant's #[error] text IS its documentation
 pub enum BoardError {
     #[error("node ids must be dense 0..{expected}, found id {found}")]
     NonDenseIds { expected: usize, found: NodeId },
@@ -171,6 +206,8 @@ pub enum BoardError {
 }
 
 impl BoardGraph {
+    /// Build the adjacency structure, validating id density and edge
+    /// endpoints.
     pub fn new(definition: BoardDefinition) -> Result<Self, BoardError> {
         let n = definition.nodes.len();
         if n == 0 {
@@ -215,18 +252,22 @@ impl BoardGraph {
         })
     }
 
+    /// The underlying data definition.
     pub fn definition(&self) -> &BoardDefinition {
         &self.definition
     }
 
+    /// Number of nodes.
     pub fn node_count(&self) -> usize {
         self.adjacency.len()
     }
 
+    /// Sorted, deduplicated neighbor list of `node`.
     pub fn neighbors(&self, node: NodeId) -> &[NodeId] {
         &self.adjacency[node as usize]
     }
 
+    /// Realm of `node`.
     pub fn realm_of(&self, node: NodeId) -> Realm {
         self.realm_of[node as usize]
     }
@@ -238,7 +279,9 @@ impl BoardGraph {
         dist[start as usize] = Some(0);
         queue.push_back(start);
         while let Some(cur) = queue.pop_front() {
-            let d = dist[cur as usize].unwrap();
+            let Some(d) = dist[cur as usize] else {
+                continue; // unreachable: queued nodes always have a distance
+            };
             for &next in self.neighbors(cur) {
                 if dist[next as usize].is_none() {
                     dist[next as usize] = Some(d + 1);

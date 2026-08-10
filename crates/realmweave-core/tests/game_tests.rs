@@ -1,5 +1,6 @@
 //! Rules, weave, pie rule, replay, and serialization tests.
 
+#![allow(clippy::unwrap_used, clippy::expect_used)] // test/tooling code
 use realmweave_core::board::BoardGraph;
 use realmweave_core::boardgen;
 use realmweave_core::rules::RuleError;

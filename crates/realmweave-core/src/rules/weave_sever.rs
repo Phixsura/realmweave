@@ -20,6 +20,7 @@ use super::*;
 /// illegal. Fallback scoring if the game stalls (two passes / full board):
 /// most potentially-connectable origins, then most scissors, then draw.
 pub struct WeaveSeverV2 {
+    /// Whether Dark may swap as its first response.
     pub pie_rule: bool,
     /// 1 = classic v2 (first confirmed weave wins). >1 = weave-layers-v3:
     /// each confirmed weave scores a layer and petrifies its network; first

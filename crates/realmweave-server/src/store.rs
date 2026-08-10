@@ -8,12 +8,14 @@ use realmweave_core::{GameConfig, GameResult, Move, Player};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use sqlx::{Row, SqlitePool};
 
+/// SQLite-backed persistence for games and their ordered event logs.
 #[derive(Clone)]
 pub struct Store {
     pool: SqlitePool,
 }
 
 impl Store {
+    /// Open (creating if missing) the database and run migrations.
     pub async fn open(path: &str) -> Result<Self, sqlx::Error> {
         let options: SqliteConnectOptions = path
             .parse::<SqliteConnectOptions>()?
@@ -50,6 +52,7 @@ impl Store {
         Ok(Store { pool })
     }
 
+    /// Insert a new game row.
     pub async fn create_game(&self, id: &str, config: &GameConfig) -> Result<(), sqlx::Error> {
         sqlx::query(
             "INSERT INTO games (id, ruleset_id, board_id, config_json, created_at)
@@ -58,7 +61,7 @@ impl Store {
         .bind(id)
         .bind(&config.ruleset_id)
         .bind(&config.board_id)
-        .bind(serde_json::to_string(config).unwrap())
+        .bind(serde_json::to_string(config).unwrap_or_default())
         .bind(now_ms())
         .execute(&self.pool)
         .await?;
@@ -66,6 +69,7 @@ impl Store {
     }
 
     #[allow(clippy::too_many_arguments)]
+    /// Append one committed move to the game's ordered event log.
     pub async fn append_event(
         &self,
         game_id: &str,
@@ -83,7 +87,7 @@ impl Store {
         .bind(seq as i64)
         .bind(ply as i64)
         .bind(player.name())
-        .bind(serde_json::to_string(mv).unwrap())
+        .bind(serde_json::to_string(mv).unwrap_or_default())
         .bind(now_ms())
         .bind(clock_json)
         .execute(&self.pool)
@@ -91,10 +95,11 @@ impl Store {
         Ok(())
     }
 
+    /// Mark a game finished with its result.
     pub async fn finish_game(&self, game_id: &str, result: &GameResult) -> Result<(), sqlx::Error> {
         sqlx::query("UPDATE games SET finished_at = ?, result_json = ? WHERE id = ?")
             .bind(now_ms())
-            .bind(serde_json::to_string(result).unwrap())
+            .bind(serde_json::to_string(result).unwrap_or_default())
             .bind(game_id)
             .execute(&self.pool)
             .await?;
@@ -141,6 +146,6 @@ impl Store {
 fn now_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_millis() as i64
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0) // pre-1970 clock: log-worthy but never fatal
 }

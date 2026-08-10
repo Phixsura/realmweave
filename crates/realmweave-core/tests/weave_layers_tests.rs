@@ -1,6 +1,7 @@
 //! Weave Layers v3: petrification, layer scoring, permanence-based strangle,
 //! replay determinism. Design: docs/design-weave-layers-v3.md.
 
+#![allow(clippy::unwrap_used, clippy::expect_used)] // test/tooling code
 use realmweave_core::board::BoardGraph;
 use realmweave_core::rules::RuleError;
 use realmweave_core::{boardgen, Game, GameConfig, Move, NodeId, Player, Realm, WEAVE_LAYERS_V3};

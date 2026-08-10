@@ -1,5 +1,6 @@
 //! End-to-end online tests: two WebSocket clients play through the server.
 
+#![allow(clippy::unwrap_used, clippy::expect_used)] // test/tooling code
 use std::sync::Arc;
 
 use futures_util::{SinkExt, StreamExt};

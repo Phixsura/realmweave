@@ -23,15 +23,24 @@ use room::Room;
 use store::Store;
 use tokio::sync::{mpsc, Mutex};
 
+/// Process-wide server state shared across connections.
 pub struct AppState {
+    /// Validated boards, keyed by board id.
     pub boards: HashMap<String, BoardDefinition>,
+    /// Live rooms, keyed by room code.
     pub rooms: Mutex<HashMap<String, Arc<Mutex<Room>>>>,
+    /// Event persistence.
     pub store: Store,
 }
 
+/// Shared handle to [`AppState`].
 pub type Shared = Arc<AppState>;
 
 /// Load and validate all board JSON files in a directory.
+///
+/// Startup-time only: a malformed shipped board is a deployment error, so
+/// failing fast (with the offending path in the panic message) is correct.
+#[allow(clippy::expect_used)]
 pub fn load_boards(dir: &str) -> HashMap<String, BoardDefinition> {
     let mut boards = HashMap::new();
     for entry in std::fs::read_dir(dir).expect("boards directory") {
@@ -60,7 +69,7 @@ async fn get_board(State(state): State<Shared>, Path(id): Path<String>) -> impl 
     match state.boards.get(&id) {
         Some(def) => (
             axum::http::StatusCode::OK,
-            serde_json::to_string(def).unwrap(),
+            serde_json::to_string(def).unwrap_or_default(),
         ),
         None => (
             axum::http::StatusCode::NOT_FOUND,
@@ -74,7 +83,7 @@ async fn get_record(State(state): State<Shared>, Path(id): Path<String>) -> impl
     match state.store.load_record(&id).await {
         Ok(Some(record)) => (
             axum::http::StatusCode::OK,
-            serde_json::to_string_pretty(&record).unwrap(),
+            serde_json::to_string_pretty(&record).unwrap_or_default(),
         ),
         Ok(None) => (
             axum::http::StatusCode::NOT_FOUND,
@@ -388,14 +397,15 @@ async fn handle_message(
                 Ok(event) => {
                     // Exchange seats: the swapper (Dark seat holder) becomes
                     // Light and vice versa.
-                    if room_guard.dark.is_some() {
+                    {
                         let room::Room { light, dark, .. } = &mut *room_guard;
-                        let dark = dark.as_mut().unwrap();
-                        std::mem::swap(&mut light.token, &mut dark.token);
-                        std::mem::swap(&mut light.tx, &mut dark.tx);
+                        if let Some(dark) = dark.as_mut() {
+                            std::mem::swap(&mut light.token, &mut dark.token);
+                            std::mem::swap(&mut light.tx, &mut dark.tx);
+                        }
                     }
                     let game_id = room_guard.game_id.clone();
-                    let clock_json = serde_json::to_string(&event.clock).unwrap();
+                    let clock_json = serde_json::to_string(&event.clock).unwrap_or_default();
                     if let Err(e) = state
                         .store
                         .append_event(
@@ -449,7 +459,7 @@ async fn play(
     };
     match room.play(seat, mv) {
         Ok(event) => {
-            let clock_json = serde_json::to_string(&event.clock).unwrap();
+            let clock_json = serde_json::to_string(&event.clock).unwrap_or_default();
             if let Err(e) = state
                 .store
                 .append_event(

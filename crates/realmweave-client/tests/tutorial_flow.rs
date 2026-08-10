@@ -1,6 +1,7 @@
 //! Tutorial step conditions verified against a real scripted game through
 //! the same core APIs the tutorial panel reads.
 
+#![allow(clippy::unwrap_used, clippy::expect_used)] // test/tooling code
 use realmweave_core::{boardgen, BoardGraph, Game, GameConfig, Move, Realm};
 
 #[test]

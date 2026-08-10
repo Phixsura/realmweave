@@ -1,6 +1,7 @@
 //! Realmweave simulation & balance tooling: self-play, board comparison,
 //! and graph fairness analysis.
 
+#![allow(clippy::unwrap_used, clippy::expect_used)] // offline tooling: fail fast is correct
 mod annotate;
 mod bots;
 mod fairness;

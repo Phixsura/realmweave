@@ -9,7 +9,9 @@ use std::collections::{HashMap, HashSet};
 use crate::board::{BoardDefinition, BoardGraph, EdgeKind, NodeId, Player, Realm};
 use crate::boardgen::{hex_distance, mirror, rotate60};
 
+/// A board validation failure. Variant messages are self-describing.
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
+#[allow(missing_docs)] // each variant's #[error] text IS its documentation
 pub enum ValidationError {
     #[error("board construction failed: {0}")]
     Graph(#[from] crate::board::BoardError),
@@ -173,7 +175,7 @@ fn check_hex_symmetry(graph: &BoardGraph) -> Result<(), ValidationError> {
     let map_with = |f: fn([i32; 2]) -> [i32; 2]| -> Option<Vec<NodeId>> {
         let mut map = vec![0; graph.node_count()];
         for node in &def.nodes {
-            let target = index.get(&(node.realm, f(node.axial.unwrap())))?;
+            let target = index.get(&(node.realm, f(node.axial?)))?;
             map[node.id as usize] = *target;
         }
         Some(map)
