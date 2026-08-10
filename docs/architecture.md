@@ -43,14 +43,16 @@ Two axes of variation, each with ONE authority:
   ID comparisons remain legitimate only for genuinely per-ruleset
   presentation (e.g. the flagship's region tinting).
 
+- **Explicit module imports**: client modules import exactly what they
+  use (`use crate::{...}`), never `use crate::*`. Module boundaries are
+  compiler-enforced — an unused dependency is a warning, a new one is a
+  visible diff line.
+- **Single teardown path**: leaving a session (leave button, tutorial
+  exit, game-over return) goes through `hud::leave_session`. New exit
+  paths must call it, not hand-roll resource removal.
+
 ## Accepted debts (reviewed, deliberate)
 
-- Client modules use `use crate::*` glob imports — a refactor-speed trade
-  from the main.rs split; boundaries are enforced by review, not the
-  compiler. Revisit if the client grows another 2×.
-- Session teardown removes ~6 resources manually in three places (leave /
-  game-over / tutorial-exit). A Bevy `AppState` + `OnExit` migration would
-  centralize it; deferred until a fourth cleanup site appears.
 - Positional-superko history is a `Vec::contains` linear scan
   (O(moves) per validate); measured ~µs at 250 moves. A HashSet in
   GameState would break serde/replay compatibility for zero felt gain.
