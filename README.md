@@ -7,30 +7,41 @@ Rust-first engine for graph-native competitive strategy games.
 > The world is a graph; strategy emerges from how players weave and sever
 > paths through it.
 
-Two players (Light and Dark) place stones across three stacked realms —
-**Heaven**, **Mortal**, and **Underworld** — connected by a limited set of
-portal gates. Under the default **supply rules**, every group of stones must
-keep a supply line back to its origins; groups cut off are captured, and the
-game is decided by area scoring (stones + territory + weave bonus + komi).
-Games run 200–440 moves depending on board size — opening, middle game, and
-endgame phases emerge like in Go, but the tactics are pure connectivity
-across three realms.
+Two players (Light and Dark) fight across three realms — **Heaven**,
+**Mortal**, and **Underworld**. The flagship ruleset is **Trinity Y v4.1**,
+built from exactly two rules:
 
-See [docs/rules.md](docs/rules.md) for the complete rules.
+1. **Y goal** — a realm is woven by whoever connects all three of its sides
+   with one group. The Y theorem guarantees every realm is decisive and
+   blocking IS building (attack-defense unity). First to two realms wins.
+2. **Death** — a group with no adjacent empty node is captured; suicide and
+   position repetition (ko) are illegal. Stones die; walls need eyes; whole
+   groups can be hunted.
+
+Three realms share one turn clock, so every stone is also a tempo decision
+about *which war to fight*. Eyes, ladders, ko fights, sacrifices, and
+comebacks must all emerge from the two rules — adding a third is forbidden
+by design discipline (docs/design-trinity-y-v4.md).
+
+Earlier rulesets (classic weave race, weave&sever, 层层编织 layers) remain
+playable and versioned; see [docs/rules.md](docs/rules.md).
 
 ## Workspace
 
 | Crate | Purpose |
 |---|---|
 | `realmweave-core` | Board graph, game state, moves, rules. Zero UI/network/DB dependencies. |
+| `realmweave-bot` | Baseline AI opponents (2-ply eval search) for supported rulesets. |
 | `realmweave-protocol` | Versioned client/server messages (serde). |
 | `realmweave-server` | Authoritative online server: rooms, WebSocket, clocks, SQLite event logs. |
 | `realmweave-client` | Native game client (Bevy): 3D stacked realms + 2D analysis view, hot-seat and online play. |
 | `realmweave-sim` | Self-play simulation, balance statistics, board comparison, fairness analysis. |
 | `realmweave-cli` | Board generation/validation, local terminal play, replay tooling. |
 
-Boards are data, never code: `boards/*.json` holds the generated
-19/37/61-nodes-per-realm hex boards, all validated in CI.
+Boards are data, never code: `boards/*.json` holds the generated hex boards
+(19–127 nodes per realm), all validated in CI; triangular trinity boards are
+generated on demand. The archived Supply War prototype builds with
+`--features supplywar-lab`.
 
 ## Quick start
 

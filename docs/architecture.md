@@ -13,12 +13,23 @@ below exists to make changing rules and board topology cheap.
 
 ```
 realmweave-core      board graph, state, moves, rules   (no UI/net/DB/async)
+realmweave-bot       baseline AI opponents              (depends: core)
 realmweave-protocol  versioned wire messages            (depends: core)
 realmweave-server    rooms, WS, clocks, persistence     (depends: core, protocol)
-realmweave-client    Bevy renderer + session/transport  (depends: core, protocol)
+realmweave-client    Bevy renderer + session/transport  (depends: core, bot, protocol)
 realmweave-sim       self-play, balance, fairness       (depends: core)
 realmweave-cli       gen/validate/play/replay tooling   (depends: core)
+realmweave-supplywar archived RTS lab (opt-in feature)  (depends: core)
 ```
+
+Rules are one module per ruleset (`core/src/rules/`): `classic.rs`,
+`weave_sever.rs` (v2+v3), `trinity_y.rs` (flagship), `shared.rs`
+(connectivity predicates), with the trait/registry in `mod.rs`. Dead
+experiments are deleted, not flag-gated — git history is the museum.
+
+The client is one module per concern (`client/src/`): `menu`, `board_view`,
+`hud`, `bots_ui` (vs-AI + exhibition), `netsync`, `replay_ui`; `main.rs`
+holds app assembly, shared resources, and the system schedule.
 
 Hard rules:
 
