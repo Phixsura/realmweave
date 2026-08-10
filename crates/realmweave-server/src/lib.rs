@@ -67,7 +67,20 @@ pub fn spawn_room_reaper(state: Shared) {
             let mut rooms = state.rooms.lock().await;
             let mut doomed = Vec::new();
             for (code, room) in rooms.iter() {
-                let room = room.lock().await;
+                let mut room = room.lock().await;
+                // Flag-fall adjudication happens HERE too: per-connection
+                // clock tickers die with their sockets, so a live game with
+                // both players gone would otherwise never time out — and a
+                // losing player could freeze the game by disconnecting.
+                if room.started && !room.finished {
+                    if let Some(flagged) = room.flagged() {
+                        let result = room.timeout(flagged);
+                        let clock = room.clock();
+                        room.broadcast(ServerMessage::GameEnded { result, clock });
+                        let _ = state.store.finish_game(&room.game_id, &result).await;
+                        tracing::info!(room = %code, "adjudicated timeout in reaper");
+                    }
+                }
                 let idle = room.last_activity.elapsed() > GRACE;
                 let reapable = room.finished || !room.started;
                 if reapable && room.fully_disconnected() && idle {
@@ -346,6 +359,7 @@ async fn handle_message(
                 return;
             }
             let token = uuid::Uuid::new_v4().to_string();
+            room.last_activity = std::time::Instant::now();
             room.dark = Some(room::Seat {
                 token: token.clone(),
                 tx: Some(unbounded_to(tx)),
@@ -394,6 +408,7 @@ async fn handle_message(
                 });
                 return;
             };
+            room.last_activity = std::time::Instant::now();
             if let Some(s) = room.seat_mut(seat) {
                 s.tx = Some(unbounded_to(tx));
             }
@@ -504,20 +519,30 @@ async fn play(
     };
     match room.play(seat, mv) {
         Ok(event) => {
-            let clock_json = serde_json::to_string(&event.clock).unwrap_or_default();
-            if let Err(e) = state
-                .store
-                .append_event(
-                    &room.game_id,
-                    event.seq,
-                    event.ply,
-                    event.player,
-                    &event.mv,
-                    &clock_json,
-                )
-                .await
-            {
-                tracing::error!("persist event: {e}");
+            // Off-turn resignations are server adjudications, not engine
+            // moves: keep them OUT of the replayable move log (the games
+            // row's result carries the outcome). Persisting them would
+            // make the exported record unreplayable — the engine would
+            // attribute the resignation to the wrong player.
+            let engine_move = !(event.mv == Move::Resign
+                && room.game.result().is_none()
+                && room.result_override.is_some());
+            if engine_move {
+                let clock_json = serde_json::to_string(&event.clock).unwrap_or_default();
+                if let Err(e) = state
+                    .store
+                    .append_event(
+                        &room.game_id,
+                        event.seq,
+                        event.ply,
+                        event.player,
+                        &event.mv,
+                        &clock_json,
+                    )
+                    .await
+                {
+                    tracing::error!("persist event: {e}");
+                }
             }
             let result = room.result();
             room.last_activity = std::time::Instant::now();

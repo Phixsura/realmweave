@@ -63,3 +63,18 @@ fn scripted_tutorial_conditions_hold() {
         })
     ));
 }
+
+/// Opening a flagship replay must not panic: the viewer session must use
+/// the record's ruleset, not the classic default (which cannot construct
+/// on side-goal boards).
+#[test]
+fn replay_session_uses_record_ruleset() {
+    let def = boardgen::generate_triforce(10).unwrap();
+    let board = BoardGraph::new(def).unwrap();
+    let cfg = GameConfig::new(board.definition().id.clone()).with_ruleset(TRIFORCE_V5);
+    let game = Game::new(board, cfg).unwrap();
+    // The construction start_replay performs:
+    let b2 = BoardGraph::new(game.board().definition().clone()).unwrap();
+    let cfg2 = GameConfig::new(b2.definition().id.clone()).with_ruleset(&game.config().ruleset_id);
+    assert!(Game::new(b2, cfg2).is_ok());
+}

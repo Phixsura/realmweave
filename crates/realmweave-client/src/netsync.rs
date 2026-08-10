@@ -102,9 +102,11 @@ pub(crate) fn net_pump(
                     commands.insert_resource(Active);
                 }
                 ServerMessage::MoveAccepted(event) => {
-                    // Swap events are seat exchanges; a Snapshot follows and
-                    // rebuilds — skip local application to avoid divergence.
-                    if event.mv != Move::Swap {
+                    // Swap events are seat exchanges (a Snapshot follows);
+                    // Resign may be OFF-TURN (server-adjudicated) — the
+                    // engine would attribute it to the wrong player. Both
+                    // resolve via authoritative messages, not local replay.
+                    if event.mv != Move::Swap && event.mv != Move::Resign {
                         session.apply_committed(event.mv);
                     }
                     session.clock = Some(event.clock);

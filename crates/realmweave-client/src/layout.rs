@@ -40,6 +40,12 @@ pub fn node_position(board: &BoardGraph, node: NodeId, mode: ViewMode) -> [f32; 
     match mode {
         ViewMode::Stacked3D => [x, y, z],
         ViewMode::Analysis2D => {
+            // Merged-field boards (triforce) are ONE flat triangle whose
+            // realm tags are interior regions — shifting per tag would tear
+            // the board into three pieces. They render as-is.
+            if board.definition().id.starts_with("tf") {
+                return [x, 0.0, z];
+            }
             let dx = analysis_offset(board);
             let shift = match def.realm {
                 Realm::Heaven => -dx,

@@ -223,6 +223,26 @@ impl Room {
         if self.finished {
             return Err("game is finished".to_string());
         }
+        // Resignation is legal at any time (like chess). The ENGINE models
+        // Resign as "the mover resigns", so an off-turn resignation must be
+        // adjudicated by the server instead of routed through the engine
+        // (which would record the WRONG player as resigning).
+        if mv == Move::Resign && self.game.to_move() != seat {
+            self.finished = true;
+            self.turn_started = None;
+            self.result_override = Some(GameResult::Win {
+                player: seat.opponent(),
+                reason: WinReason::Resignation,
+            });
+            let seq = self.next_seq();
+            return Ok(MoveEvent {
+                seq,
+                ply: self.game.state().ply,
+                player: seat,
+                mv,
+                clock: self.clock(),
+            });
+        }
         if self.game.to_move() != seat {
             return Err("not your turn".to_string());
         }

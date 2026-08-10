@@ -191,7 +191,15 @@ impl Session {
     }
 
     pub fn swap_available(&self) -> bool {
-        self.is_my_turn() && self.game.legal_moves().contains(&Move::Swap)
+        // Cheap direct check — enumerating every legal move per frame just
+        // to find Swap ran a full-board capture simulation each frame.
+        let st = self.game.state();
+        self.is_my_turn()
+            && self.game.config().pie_rule
+            && !st.swap_used
+            && st.ply == 1
+            && st.to_move == Player::Dark
+            && self.game.validate(&Move::Swap).is_ok()
     }
 
     /// Apply an intent locally (hot-seat) — online mode sends to the server

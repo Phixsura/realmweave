@@ -26,10 +26,15 @@ impl ReplayState {
     pub fn load(path: &str) -> Result<Self, String> {
         let text = std::fs::read_to_string(path).map_err(|e| format!("{path}: {e}"))?;
         let record: GameRecord = serde_json::from_str(&text).map_err(|e| format!("{path}: {e}"))?;
-        // Validate the record replays cleanly before accepting it.
+        // Validate the record replays cleanly before accepting it. A record
+        // may carry a SERVER-adjudicated result the engine cannot derive
+        // (timeout; off-turn resignation) — engine None is acceptable, but
+        // two CONTRADICTORY results are not.
         let game = Self::build(&record, record.moves.len())?;
-        if record.result.is_some() && game.result() != record.result {
-            return Err("record result does not match replayed result".to_string());
+        if let (Some(recorded), Some(replayed)) = (record.result, game.result()) {
+            if recorded != replayed {
+                return Err("record result contradicts replayed result".to_string());
+            }
         }
         // Sidecar annotations: `<path minus .json>.notes.json`.
         let notes_path = path

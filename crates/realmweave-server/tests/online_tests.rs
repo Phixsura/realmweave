@@ -445,3 +445,51 @@ async fn room_reaper_predicate() {
     room.light.tx = Some(tx);
     assert!(!room.fully_disconnected());
 }
+
+/// Resignation is legal at any time — including on the OPPONENT's turn —
+/// and must attribute the win to the right player.
+#[tokio::test]
+async fn off_turn_resignation_attributes_correctly() {
+    let (addr, _state) = start_server().await;
+    let (mut a, mut b, _room, _ta, _tb) = setup_room(&addr).await;
+    // Light (a) to move. DARK (b) resigns off-turn.
+    b.send(ClientMessage::Resign).await;
+    // Both receive MoveAccepted(Resign) then GameEnded with Light winning.
+    let mut ended_ok = false;
+    for _ in 0..4 {
+        match b.recv().await {
+            ServerMessage::GameEnded { result, .. } => {
+                assert!(matches!(
+                    result,
+                    realmweave_core::GameResult::Win {
+                        player: realmweave_core::Player::Light,
+                        reason: realmweave_core::WinReason::Resignation
+                    }
+                ));
+                ended_ok = true;
+                break;
+            }
+            _ => continue,
+        }
+    }
+    assert!(ended_ok, "GameEnded must arrive with Light as winner");
+    // Light's side sees it too.
+    let mut a_ok = false;
+    for _ in 0..4 {
+        match a.recv().await {
+            ServerMessage::GameEnded { result, .. } => {
+                assert!(matches!(
+                    result,
+                    realmweave_core::GameResult::Win {
+                        player: realmweave_core::Player::Light,
+                        ..
+                    }
+                ));
+                a_ok = true;
+                break;
+            }
+            _ => continue,
+        }
+    }
+    assert!(a_ok);
+}

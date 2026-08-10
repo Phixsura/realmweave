@@ -325,8 +325,11 @@ pub(crate) fn start_online_create(commands: &mut Commands, ui: &mut UiState) {
     } else {
         format!("hex{}-v1", ui.board_size)
     };
-    // Local mirror starts from the same board; the server snapshot confirms.
-    match net::fetch_board(&ui.server_addr, &board_id)
+    // Local mirror starts from the same board; the server snapshot
+    // confirms. Generated ids resolve locally (no blocking fetch).
+    match boardgen::resolve(&board_id)
+        .ok_or(())
+        .or_else(|()| net::fetch_board(&ui.server_addr, &board_id))
         .and_then(|def| BoardGraph::new(def).map_err(|e| e.to_string()))
     {
         Ok(board) => {
@@ -360,7 +363,14 @@ pub(crate) fn start_replay(commands: &mut Commands, ui: &mut UiState, auto_secon
             match initial {
                 Ok(game) => {
                     let board = BoardGraph::new(game.board().definition().clone()).expect("board");
-                    let mut session = Session::hotseat(board, false);
+                    // Session must use the RECORD's ruleset: the classic
+                    // default cannot even construct on side-goal boards
+                    // (IncompatibleBoard → panic).
+                    let mut session = Session::hotseat_with_rules(
+                        board,
+                        game.config().pie_rule,
+                        &game.config().ruleset_id.clone(),
+                    );
                     session.control = Control::Observer;
                     session.game = game;
                     commands.insert_resource(GameSession(session));
