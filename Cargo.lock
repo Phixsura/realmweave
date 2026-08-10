@@ -4787,6 +4787,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "rand 0.8.7",
+ "realmweave-bot",
  "realmweave-core",
  "serde",
  "serde_json",

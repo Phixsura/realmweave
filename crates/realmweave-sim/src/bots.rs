@@ -54,6 +54,20 @@ pub struct GreedyBot {
 
 impl Bot for GreedyBot {
     fn choose(&mut self, game: &Game) -> Option<Move> {
+        // Y-family boards have no origins, so the origin-pair connection
+        // score is identically zero and "greedy" silently degrades to
+        // uniform random — misleading for balance sweeps. Route those to
+        // the real engine at a light budget instead.
+        if game.board().definition().origins.is_empty() {
+            return realmweave_bot::choose_move_with_budget(
+                game,
+                self.rng.gen(),
+                realmweave_bot::mcts::MctsConfig {
+                    playouts: 300,
+                    c: 0.9,
+                },
+            );
+        }
         let candidates = placements(game);
         if candidates.is_empty() {
             return game

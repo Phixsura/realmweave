@@ -42,7 +42,12 @@ pub(crate) fn apply_replay_cursor(
             session.0.game = game;
             *last_cursor = Some(replay.0.cursor);
         }
-        Err(e) => ui.status = format!("replay error: {e}"),
+        Err(e) => {
+            // Remember the failed cursor too — otherwise this retries (and
+            // spams status) every frame for the same position.
+            *last_cursor = Some(replay.0.cursor);
+            ui.status = format!("replay error: {e}");
+        }
     }
 }
 

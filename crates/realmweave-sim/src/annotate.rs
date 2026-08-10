@@ -79,7 +79,8 @@ fn zero_one(game: &Game, from: NodeId, to: NodeId, player: Player) -> Option<i64
     None
 }
 
-/// Produce annotations for every move of a supply-rules record.
+/// Produce annotations for every move of a recorded game (generic across
+/// rulesets; wording is connection-flavored).
 pub fn annotate(board: BoardGraph, config: GameConfig, moves: &[Move]) -> Vec<Annotation> {
     let mut game = Game::new(BoardGraph::new(board.definition().clone()).unwrap(), config).unwrap();
     let mut out = Vec::new();
@@ -107,7 +108,7 @@ pub fn annotate(board: BoardGraph, config: GameConfig, moves: &[Move]) -> Vec<An
                 let mut parts: Vec<String> = Vec::new();
                 let captured = (caps_after[0] + caps_after[1]) - (caps_before[0] + caps_before[1]);
                 if captured > 0 {
-                    parts.push(format!("提掉对方 {captured} 子！断其补给线，整组阵亡"));
+                    parts.push(format!("提掉对方 {captured} 子！无气之链整组离场"));
                 }
                 let my_gain = me_before - me_after;
                 if my_gain > 0 {
@@ -118,13 +119,13 @@ pub fn annotate(board: BoardGraph, config: GameConfig, moves: &[Move]) -> Vec<An
                     parts.push(format!("同时把对方的连接路线逼远 {their_loss} 步"));
                 }
                 if !my_weave_before && game.has_realm_weave(mover) {
-                    parts.push("三起源贯通——编织完成，+10 目奖励到手".to_string());
+                    parts.push("三起源贯通——编织完成".to_string());
                 }
                 if parts.is_empty() {
                     parts.push(if board_ref.definition().gate_nodes().contains(node) {
-                        "抢占门柱：这是穿层电梯口，为跨界补给预留通道".to_string()
+                        "抢占门柱：这是穿层电梯口，为跨界连接预留通道".to_string()
                     } else {
-                        "铺设补给网／扩张势力范围的次序棋".to_string()
+                        "铺网／扩张势力范围的次序棋".to_string()
                     });
                 }
                 format!(
@@ -133,7 +134,7 @@ pub fn annotate(board: BoardGraph, config: GameConfig, moves: &[Move]) -> Vec<An
                     parts.join("；")
                 )
             }
-            Move::Pass => "停一手。已无有利可图的落点——多下反而送目".to_string(),
+            Move::Pass => "停一手".to_string(),
             Move::Sever(node) => format!("切断 {}", node_label(board_ref, *node)),
             Move::CutEdge(e) => {
                 let edge = &board_ref.definition().edges[*e as usize];

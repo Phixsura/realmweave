@@ -27,8 +27,12 @@ enum Command {
         size: Option<usize>,
         /// Generate a trinity (triangular side-goal) board with this side
         /// length instead of a hex board.
-        #[arg(long)]
+        #[arg(long, conflicts_with = "triforce")]
         trinity: Option<usize>,
+        /// Generate a triforce (merged-triangle flagship) board with this
+        /// even side length.
+        #[arg(long)]
+        triforce: Option<usize>,
         /// Portal layout.
         #[arg(long, default_value = "inner6-outer6")]
         portals: String,
@@ -41,7 +45,7 @@ enum Command {
     /// Play a local two-player game in the terminal.
     Play {
         /// Board definition file, or a generated board id
-        /// (hex19/37/61/91/127-v1, tri4..26-v4).
+        /// (hex19/37/61/91/127-v1, tri4..26-v4, tf8..40-v5, hex61-s123).
         #[arg(long)]
         board: String,
         /// Enable the pie (swap) rule.
@@ -86,9 +90,31 @@ fn run(cli: Cli) -> Result<(), String> {
         Command::GenBoard {
             size,
             trinity,
+            triforce,
             portals,
             output,
         } => {
+            if let Some(side) = triforce {
+                let def = boardgen::generate_triforce(side)
+                    .ok_or_else(|| format!("unsupported triforce side {side}; use even 8..=40"))?;
+                validate_board(&def)
+                    .map_err(|e| format!("generated board failed validation: {e}"))?;
+                let json = serde_json::to_string_pretty(&def).map_err(|e| e.to_string())?;
+                match output {
+                    Some(path) => {
+                        std::fs::write(&path, json + "\n")
+                            .map_err(|e| format!("{}: {e}", path.display()))?;
+                        eprintln!(
+                            "wrote {} ({} nodes, {} edges)",
+                            path.display(),
+                            def.nodes.len(),
+                            def.edges.len()
+                        );
+                    }
+                    None => println!("{json}"),
+                }
+                return Ok(());
+            }
             if let Some(side) = trinity {
                 let def = boardgen::generate_trinity(side)
                     .ok_or_else(|| format!("unsupported trinity side {side}; use 4..=26"))?;

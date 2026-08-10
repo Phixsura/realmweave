@@ -77,7 +77,10 @@ pub fn render(game: &Game) -> String {
         out.push('\n');
     }
     out.push_str("legend: L/D stones, l/d origins, * empty gate, . empty\n");
-    if game.config().ruleset_id == realmweave_core::WEAVE_SEVER_V2 {
+    if matches!(
+        game.config().ruleset_id.as_str(),
+        realmweave_core::WEAVE_SEVER_V2 | realmweave_core::WEAVE_LAYERS_V3
+    ) {
         out.push_str(&format!(
             "scissors: Light {} | Dark {}   cut edges: {}\n",
             state.scissors[0],

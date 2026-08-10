@@ -54,7 +54,7 @@ impl BatchStats {
             .filter(|m| matches!(m, Move::Place(_)))
             .count();
         self.move_counts.push(placements as u32);
-        let capacity = game.board().node_count() - 6; // minus origins
+        let capacity = game.board().node_count() - game.board().definition().origins.len();
         self.fill_ratios.push(placements as f64 / capacity as f64);
 
         // Portal usage: fraction of gate nodes occupied at game end.

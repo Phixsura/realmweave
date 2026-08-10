@@ -57,8 +57,8 @@ enum Command {
         /// MCTS playouts per move (bot=mcts only).
         #[arg(long, default_value_t = 400)]
         playouts: u32,
-        /// Ruleset id (three-realms-v1 | three-realms-doubleweave-v1 |
-        /// three-realms-sever-v1 | weave-sever-v2 | weave-layers-v3 | trinity-y-v4).
+        /// Ruleset id (triforce-v5 | trinity-y-v4 | weave-layers-v3 |
+        /// weave-sever-v2 | three-realms-v1 | three-realms-sever-v1).
         #[arg(long, default_value = "three-realms-v1")]
         ruleset: String,
         /// Save the first game's record (replayable JSON) to this path.
@@ -98,6 +98,13 @@ enum Command {
 }
 
 fn load(path: &PathBuf) -> Result<BoardGraph, String> {
+    // Generated board ids (hex61-v1, tf22-v5, …) resolve without a file,
+    // matching the CLI play command's convention.
+    if let Some(id) = path.to_str() {
+        if let Some(def) = realmweave_core::boardgen::resolve(id) {
+            return validate_board(&def).map_err(|e| e.to_string());
+        }
+    }
     let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let def: BoardDefinition =
         serde_json::from_str(&text).map_err(|e| format!("{}: {e}", path.display()))?;
