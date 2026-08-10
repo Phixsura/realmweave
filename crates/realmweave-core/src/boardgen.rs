@@ -526,3 +526,21 @@ pub fn trinity_sides(side: usize, node: NodeId) -> u8 {
     }
     mask
 }
+
+/// Resolve a board id to its definition, regenerating deterministically for
+/// every generated family: `hex{19,37,61,91,127}-v1` and `tri{4..26}-v4`.
+/// The single source of truth for id → board across replay, resume, CLI,
+/// and tooling — file lookups are the caller's fallback, not the default.
+pub fn resolve(board_id: &str) -> Option<BoardDefinition> {
+    if let Some(rest) = board_id.strip_prefix("hex") {
+        if let Some(size) = rest.strip_suffix("-v1").and_then(|s| s.parse().ok()) {
+            return generate_standard(size);
+        }
+    }
+    if let Some(rest) = board_id.strip_prefix("tri") {
+        if let Some(side) = rest.strip_suffix("-v4").and_then(|s| s.parse().ok()) {
+            return generate_trinity(side);
+        }
+    }
+    None
+}

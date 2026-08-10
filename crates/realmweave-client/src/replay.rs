@@ -63,16 +63,13 @@ impl ReplayState {
         self.record.moves.len()
     }
 
-    /// Board for the record's board id. Standard ids (hex19/37/61-v1) are
-    /// regenerated deterministically; anything else must be resolvable as a
-    /// local file path in `boards/`.
+    /// Board for the record's board id: every generated family regenerates
+    /// deterministically (hex + trinity); unknown ids fall back to a local
+    /// file in `boards/` (hand-made boards).
     fn board(record: &GameRecord) -> Result<BoardGraph, String> {
         let id = &record.config.board_id;
-        for size in [19usize, 37, 61] {
-            if *id == format!("hex{size}-v1") {
-                let def = boardgen::generate_standard(size).expect("standard size");
-                return BoardGraph::new(def).map_err(|e| e.to_string());
-            }
+        if let Some(def) = boardgen::resolve(id) {
+            return BoardGraph::new(def).map_err(|e| e.to_string());
         }
         let path = format!("boards/{id}.json");
         let text = std::fs::read_to_string(&path)

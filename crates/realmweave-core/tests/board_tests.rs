@@ -301,3 +301,18 @@ fn board_serde_round_trip() {
     assert_eq!(def.origins, back.origins);
     validate_board(&back).unwrap();
 }
+
+/// boardgen::resolve is the single source of truth for id → board.
+#[test]
+fn resolve_covers_all_generated_families() {
+    for id in ["hex19-v1", "hex37-v1", "hex61-v1", "hex91-v1", "hex127-v1"] {
+        let def = realmweave_core::boardgen::resolve(id).expect(id);
+        assert_eq!(def.id, id);
+    }
+    for id in ["tri8-v4", "tri14-v4"] {
+        let def = realmweave_core::boardgen::resolve(id).expect(id);
+        assert_eq!(def.id, id);
+    }
+    assert!(realmweave_core::boardgen::resolve("hex999-v1").is_none());
+    assert!(realmweave_core::boardgen::resolve("nonsense").is_none());
+}

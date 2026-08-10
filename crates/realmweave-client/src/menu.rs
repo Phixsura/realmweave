@@ -390,28 +390,7 @@ pub(crate) fn resume_saved(commands: &mut Commands, ui: &mut UiState) {
             return;
         }
     };
-    let def = if record.config.board_id.starts_with("tri") {
-        let side = record
-            .config
-            .board_id
-            .trim_start_matches("tri")
-            .split('-')
-            .next()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(14);
-        boardgen::generate_trinity(side)
-    } else {
-        let size = record
-            .config
-            .board_id
-            .trim_start_matches("hex")
-            .split('-')
-            .next()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(91);
-        boardgen::generate_standard(size)
-    };
-    let Some(def) = def else {
+    let Some(def) = boardgen::resolve(&record.config.board_id) else {
         ui.status = format!("unknown board {}", record.config.board_id);
         return;
     };

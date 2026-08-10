@@ -40,16 +40,16 @@ enum Command {
     Validate { files: Vec<PathBuf> },
     /// Play a local two-player game in the terminal.
     Play {
-        /// Board definition file.
+        /// Board definition file, or a generated board id
+        /// (hex19/37/61/91/127-v1, tri4..26-v4).
         #[arg(long)]
-        board: PathBuf,
+        board: String,
         /// Enable the pie (swap) rule.
         #[arg(long)]
         pie: bool,
-        /// Ruleset id (three-realms-supply-v1 | three-realms-v1 |
-        /// three-realms-sever-v1 | three-realms-doubleweave-v1 |
-        /// three-realms-territory-v1).
-        #[arg(long, default_value = "three-realms-supply-v1")]
+        /// Ruleset id (trinity-y-v4 | weave-layers-v3 | weave-sever-v2 |
+        /// three-realms-v1 | three-realms-sever-v1).
+        #[arg(long, default_value = "trinity-y-v4")]
         ruleset: String,
     },
     /// Step through a recorded game (GameRecord JSON).
@@ -189,7 +189,11 @@ fn run(cli: Cli) -> Result<(), String> {
             pie,
             ruleset,
         } => {
-            let def = load_board(&board)?;
+            // Generated id first, file path second.
+            let def = match boardgen::resolve(&board) {
+                Some(def) => def,
+                None => load_board(&PathBuf::from(&board))?,
+            };
             let graph = validate_board(&def).map_err(|e| e.to_string())?;
             play::run_interactive(graph, pie, &ruleset)
         }
