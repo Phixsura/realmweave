@@ -5,12 +5,16 @@
 use proptest::prelude::*;
 use realmweave_core::{boardgen, BoardGraph, Game, GameConfig, Move};
 
+fn board_for(ruleset: &str) -> realmweave_core::BoardDefinition {
+    match ruleset {
+        realmweave_core::TRINITY_Y_V4 => boardgen::generate_trinity(7).expect("trinity"),
+        realmweave_core::TRIFORCE_V5 => boardgen::generate_triforce(8).expect("triforce"),
+        _ => boardgen::generate_standard(19).expect("standard"),
+    }
+}
+
 fn play_random(ruleset: &str, seed: u64, max_moves: usize) -> Game {
-    let def = if ruleset == realmweave_core::TRINITY_Y_V4 {
-        boardgen::generate_trinity(7).expect("trinity")
-    } else {
-        boardgen::generate_standard(19).expect("standard")
-    };
+    let def = board_for(ruleset);
     let board = BoardGraph::new(def).expect("board");
     let cfg = GameConfig::new(board.definition().id.clone()).with_ruleset(ruleset);
     let mut game = Game::new(board, cfg).expect("game");
@@ -46,11 +50,7 @@ proptest! {
     fn replay_determinism_all_rulesets(seed in any::<u64>()) {
         for ruleset in realmweave_core::ALL_RULESETS {
             let game = play_random(ruleset, seed, 40);
-            let def = if ruleset == realmweave_core::TRINITY_Y_V4 {
-                boardgen::generate_trinity(7).expect("trinity")
-            } else {
-                boardgen::generate_standard(19).expect("standard")
-            };
+            let def = board_for(ruleset);
             let board = BoardGraph::new(def).expect("board");
             let replayed = Game::replay(board, game.config().clone(), &game.state().move_log)
                 .expect("recorded games replay");

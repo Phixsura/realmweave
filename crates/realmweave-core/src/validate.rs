@@ -58,16 +58,20 @@ pub fn validate_board(definition: &BoardDefinition) -> Result<BoardGraph, Valida
         if !edge_keys.insert(edge.key()) {
             return Err(ValidationError::DuplicateEdge(edge.a, edge.b));
         }
-        let (ra, rb) = (graph.realm_of(edge.a), graph.realm_of(edge.b));
-        match edge.kind {
-            EdgeKind::IntraRealm => {
-                if ra != rb {
-                    return Err(ValidationError::IntraRealmCrossesRealms(edge.a, edge.b));
+        // Merged-field boards (triforce): realm tags are interior regions
+        // of ONE battlefield — edges legitimately cross region boundaries.
+        if !def.id.starts_with("tf") {
+            let (ra, rb) = (graph.realm_of(edge.a), graph.realm_of(edge.b));
+            match edge.kind {
+                EdgeKind::IntraRealm => {
+                    if ra != rb {
+                        return Err(ValidationError::IntraRealmCrossesRealms(edge.a, edge.b));
+                    }
                 }
-            }
-            EdgeKind::Portal => {
-                if !ra.is_adjacent(rb) {
-                    return Err(ValidationError::InvalidPortal(edge.a, edge.b));
+                EdgeKind::Portal => {
+                    if !ra.is_adjacent(rb) {
+                        return Err(ValidationError::InvalidPortal(edge.a, edge.b));
+                    }
                 }
             }
         }
@@ -107,7 +111,18 @@ pub fn validate_board(definition: &BoardDefinition) -> Result<BoardGraph, Valida
     }
 
     // --- connectivity ---
-    if side_goal {
+    let merged_field = def.id.starts_with("tf");
+    if merged_field {
+        // One connected battlefield.
+        let dist = graph.bfs_distances(0);
+        let unreached = dist.iter().filter(|d| d.is_none()).count();
+        if unreached > 0 {
+            return Err(ValidationError::Disconnected {
+                unreached,
+                total: graph.node_count(),
+            });
+        }
+    } else if side_goal {
         // Each realm must be internally connected.
         let per_realm = graph.node_count() / 3;
         for realm in 0..3 {
@@ -134,8 +149,11 @@ pub fn validate_board(definition: &BoardDefinition) -> Result<BoardGraph, Valida
         }
     }
 
-    // --- realm equivalence ---
-    check_realm_equivalence(&graph)?;
+    // --- realm equivalence (not applicable to merged-field boards where
+    // realm tags are interior regions of one triangle) ---
+    if !merged_field {
+        check_realm_equivalence(&graph)?;
+    }
 
     // --- symmetry automorphisms (hex boards with axial data) ---
     check_hex_symmetry(&graph)?;
@@ -202,6 +220,31 @@ fn check_hex_symmetry(graph: &BoardGraph) -> Result<(), ValidationError> {
     // left-right mirror (col -> row - col), which any fair triangle must
     // admit; the 120° rotations need barycentric coords and are guaranteed
     // by construction in the generator.
+    if def.id.starts_with("tf") {
+        // Triforce: one triangle; realm tags mark interior regions, not
+        // separate components. Mirror symmetry (c → r−c) must hold.
+        let index = graph.axial_index();
+        let mut map = vec![0; graph.node_count()];
+        for node in &def.nodes {
+            let Some([r, c]) = node.axial else {
+                return Ok(());
+            };
+            let Some(target) = index.get(&(node.realm, [r, r - c])).or_else(|| {
+                // mirrored node may carry a different realm tag (left/right
+                // swap): search all realms at that coordinate
+                crate::board::Realm::ALL
+                    .iter()
+                    .find_map(|&rm| index.get(&(rm, [r, r - c])))
+            }) else {
+                return Err(ValidationError::NotAutomorphism("triforce mirror"));
+            };
+            map[node.id as usize] = *target;
+        }
+        if !is_automorphism(graph, &map) {
+            return Err(ValidationError::NotAutomorphism("triforce mirror"));
+        }
+        return Ok(());
+    }
     if def.id.starts_with("tri") {
         let index = graph.axial_index();
         let mut map = vec![0; graph.node_count()];

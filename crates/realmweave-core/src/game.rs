@@ -73,7 +73,10 @@ impl Game {
         // boards (no origins); every other ruleset needs origins. A
         // mismatch produces silent nonsense games, so reject it here.
         let has_origins = !board.definition().origins.is_empty();
-        let wants_origins = config.ruleset_id != rules::TRINITY_Y_V4;
+        let wants_origins = !matches!(
+            config.ruleset_id.as_str(),
+            rules::TRINITY_Y_V4 | rules::TRIFORCE_V5
+        );
         if has_origins != wants_origins {
             return Err(GameError::IncompatibleBoard {
                 ruleset: config.ruleset_id.clone(),

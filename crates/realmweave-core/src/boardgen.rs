@@ -542,5 +542,116 @@ pub fn resolve(board_id: &str) -> Option<BoardDefinition> {
             return generate_trinity(side);
         }
     }
+    if let Some(rest) = board_id.strip_prefix("tf") {
+        if let Some(side) = rest.strip_suffix("-v5").and_then(|s| s.parse().ok()) {
+            return generate_triforce(side);
+        }
+    }
     None
+}
+
+// -------------------------------------------------------------- triforce ---
+
+/// v5 "Triforce" board: ONE large triangle (side length `side`) whose three
+/// corner sub-triangles are the realms — Heaven (top), Mortal (left),
+/// Underworld (right) — and whose central inverted triangle is the
+/// weave-heart where all three realms meet. One connected battlefield:
+/// winning paths must cross realms (measured: 100% of random-fill wins
+/// span ≥2 realms and touch the heart; docs/research-triforce.md).
+///
+/// Coordinates are (row, col) like trinity boards. `side` must be even so
+/// the four sub-triangles are exact. Node realm tags mark the corner
+/// regions for rendering; heart nodes are tagged `Mortal` (tags are visual
+/// metadata here — legality only reads the graph).
+pub fn generate_triforce(side: usize) -> Option<BoardDefinition> {
+    if !(8..=40).contains(&side) || !side.is_multiple_of(2) {
+        return None;
+    }
+    let mut nodes = Vec::new();
+    let mut edges = Vec::new();
+    let index = |r: usize, c: usize| -> NodeId { (r * (r + 1) / 2 + c) as NodeId };
+    for r in 0..side {
+        for c in 0..=r {
+            let id = index(r, c);
+            let realm = match triforce_region(side, id) {
+                0 => Realm::Heaven,
+                1 => Realm::Mortal,
+                2 => Realm::Underworld,
+                _ => Realm::Mortal, // heart: tag is cosmetic, region fn is truth
+            };
+            let x = c as f32 - r as f32 / 2.0;
+            let z = r as f32 * 0.866 - side as f32 * 0.433;
+            nodes.push(Node {
+                id,
+                realm,
+                position: [x, 0.0, z],
+                axial: Some([r as i32, c as i32]),
+            });
+            if c < r {
+                edges.push(Edge {
+                    a: id,
+                    b: index(r, c + 1),
+                    kind: EdgeKind::IntraRealm,
+                });
+            }
+            if r + 1 < side {
+                edges.push(Edge {
+                    a: id,
+                    b: index(r + 1, c),
+                    kind: EdgeKind::IntraRealm,
+                });
+                edges.push(Edge {
+                    a: id,
+                    b: index(r + 1, c + 1),
+                    kind: EdgeKind::IntraRealm,
+                });
+            }
+        }
+    }
+    Some(BoardDefinition {
+        id: format!("tf{side}-v5"),
+        version: 1,
+        nodes,
+        edges,
+        origins: Vec::new(),
+    })
+}
+
+/// Region of a triforce node: 0 = Heaven (top corner), 1 = Mortal (left),
+/// 2 = Underworld (right), 3 = the weave-heart (central inverted triangle).
+pub fn triforce_region(side: usize, node: NodeId) -> usize {
+    let local = node as usize;
+    let r = ((((8 * local + 1) as f64).sqrt() - 1.0) / 2.0) as usize;
+    let c = local - r * (r + 1) / 2;
+    let h = side / 2;
+    if r < h {
+        return 0;
+    }
+    let rr = r - h;
+    if c <= rr {
+        return 1;
+    }
+    if c >= h {
+        return 2;
+    }
+    3
+}
+
+/// Which sides of the BIG triangle a triforce node lies on (bitmask:
+/// 1 = left, 2 = right, 4 = bottom). Same convention as `trinity_sides`.
+pub fn triforce_sides(side: usize, node: NodeId) -> u8 {
+    let local = node as usize;
+    let r = ((((8 * local + 1) as f64).sqrt() - 1.0) / 2.0) as usize;
+    let c = local - r * (r + 1) / 2;
+    let mut mask = 0u8;
+    if c == 0 {
+        mask |= 1;
+    }
+    if c == r {
+        mask |= 2;
+    }
+    if r == side - 1 {
+        mask |= 4;
+    }
+    mask
 }

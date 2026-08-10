@@ -197,7 +197,9 @@ fn trinity_cost(game: &Game, player: Player) -> i64 {
     let bd = game.board();
     let st = game.state();
     let n = bd.node_count();
-    let per_realm = n / 3;
+    // Triforce: one realm spanning the board; trinity: three partitions.
+    let triforce = game.config().ruleset_id == rules::TRIFORCE_V5;
+    let per_realm = if triforce { n } else { n / 3 };
     let side_len = (((8 * per_realm + 1) as f64).sqrt() as usize - 1) / 2;
     // Entry cost with the same anti-ruler medicine as the hex eval:
     // contested empties cost more, and deterministic terrain grain breaks
@@ -222,14 +224,19 @@ fn trinity_cost(game: &Game, player: Player) -> i64 {
                 // all three sides, so a naked edge line is the "cheapest" Y —
                 // and the weakest (Y wisdom: edge play loses to cutting).
                 // Charge rim cells extra so routes arc through the interior.
-                let sides = realmweave_core::boardgen::trinity_sides(side_len, node);
+                let sides = if triforce {
+                    realmweave_core::boardgen::triforce_sides(side_len, node)
+                } else {
+                    realmweave_core::boardgen::trinity_sides(side_len, node)
+                };
                 let edge_pen = if sides != 0 { 6 } else { 0 };
                 Some(4 + grain + edge_pen + 2 * enemy_adj.min(3))
             }
         }
     };
     let mut total = 0i64;
-    for realm in 0..3 {
+    let realms = if triforce { 1 } else { 3 };
+    for realm in 0..realms {
         let lo = (realm * per_realm) as NodeId;
         let hi = lo + per_realm as NodeId;
         // dist from each of the 3 sides via Dijkstra over entry costs
@@ -238,7 +245,12 @@ fn trinity_cost(game: &Game, player: Player) -> i64 {
             let mut dist = vec![i64::MAX; n];
             let mut heap = std::collections::BinaryHeap::new();
             for start in lo..hi {
-                if realmweave_core::boardgen::trinity_sides(side_len, start) & side_bit == 0 {
+                let start_sides = if triforce {
+                    realmweave_core::boardgen::triforce_sides(side_len, start)
+                } else {
+                    realmweave_core::boardgen::trinity_sides(side_len, start)
+                };
+                if start_sides & side_bit == 0 {
                     continue;
                 }
                 let Some(c) = entry(start) else { continue };
@@ -547,9 +559,12 @@ pub fn choose_move(game: &Game, seed: u64) -> Option<Move> {
 /// Like [`choose_move`] with an explicit MCTS budget (trinity only; other
 /// rulesets use the fixed 2-ply search).
 pub fn choose_move_with_budget(game: &Game, seed: u64, budget: mcts::MctsConfig) -> Option<Move> {
-    // Trinity boards get the real engine: UCT over a fast simulator.
+    // Y-family boards get the real engine: UCT over a fast simulator.
     if game.board().definition().origins.is_empty()
-        && game.config().ruleset_id == rules::TRINITY_Y_V4
+        && matches!(
+            game.config().ruleset_id.as_str(),
+            rules::TRINITY_Y_V4 | rules::TRIFORCE_V5
+        )
     {
         // The simulator plays simple-ko; the engine enforces positional
         // superko. A rules divergence here must never leak to callers: an
@@ -667,6 +682,7 @@ pub fn supports(ruleset_id: &str) -> bool {
         rules::WEAVE_SEVER_V2
             | rules::WEAVE_LAYERS_V3
             | rules::TRINITY_Y_V4
+            | rules::TRIFORCE_V5
             | rules::THREE_REALMS_V1
             | rules::SEVER_V1
     )

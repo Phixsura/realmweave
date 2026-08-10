@@ -26,10 +26,20 @@ impl Default for MctsConfig {
     }
 }
 
-/// Fast trinity position: enough state for legal playouts, nothing more.
+/// Board family the simulator is playing.
+#[derive(Clone, Copy, PartialEq)]
+enum SimMode {
+    /// Three separate triangles; two realm-Ys win (trinity-y-v4).
+    Trinity,
+    /// One merged triangle; a single big Y wins (triforce-v5).
+    Triforce,
+}
+
+/// Fast Y-family position: enough state for legal playouts, nothing more.
 #[derive(Clone)]
 struct Sim<'a> {
     board: &'a BoardGraph,
+    mode: SimMode,
     side: usize,
     per_realm: usize,
     occ: Vec<Option<Player>>,
@@ -63,11 +73,21 @@ fn sim_hash(sim: &Sim, board_id: &str, mover: Player) -> u64 {
 impl<'a> Sim<'a> {
     fn from_game(game: &'a Game) -> Self {
         let board = game.board();
-        let per_realm = board.node_count() / 3;
+        let mode = if game.config().ruleset_id == realmweave_core::rules::TRIFORCE_V5 {
+            SimMode::Triforce
+        } else {
+            SimMode::Trinity
+        };
+        let n = board.node_count();
+        let per_realm = match mode {
+            SimMode::Trinity => n / 3,
+            SimMode::Triforce => n, // one realm spanning the whole board
+        };
         let side = (((8 * per_realm + 1) as f64).sqrt() as usize - 1) / 2;
         let st = game.state();
         let mut sim = Sim {
             board,
+            mode,
             side,
             per_realm,
             occ: st.occupancy.clone(),
@@ -76,7 +96,11 @@ impl<'a> Sim<'a> {
             winner: None,
             ko_point: None,
         };
-        for realm in 0..3 {
+        let realms = match mode {
+            SimMode::Trinity => 3,
+            SimMode::Triforce => 1,
+        };
+        for realm in 0..realms {
             sim.realm_won[realm] = sim.realm_winner(realm);
         }
         sim.update_match_winner();
@@ -85,6 +109,14 @@ impl<'a> Sim<'a> {
 
     fn realm_of(&self, node: NodeId) -> usize {
         node as usize / self.per_realm
+    }
+
+    /// Side bitmask under the current mode's geometry.
+    fn sides_of(&self, node: NodeId) -> u8 {
+        match self.mode {
+            SimMode::Trinity => boardgen::trinity_sides(self.side, node),
+            SimMode::Triforce => boardgen::triforce_sides(self.side, node),
+        }
     }
 
     /// One group's members + liberty flag (early-exits on second liberty).
@@ -177,8 +209,12 @@ impl<'a> Sim<'a> {
     }
 
     fn update_match_winner(&mut self) {
+        let need = match self.mode {
+            SimMode::Trinity => 2,
+            SimMode::Triforce => 1,
+        };
         for pl in [Player::Light, Player::Dark] {
-            if self.realm_won.iter().filter(|w| **w == Some(pl)).count() >= 2 {
+            if self.realm_won.iter().filter(|w| **w == Some(pl)).count() >= need {
                 self.winner = Some(pl);
             }
         }
@@ -199,7 +235,7 @@ impl<'a> Sim<'a> {
                 }
                 if !seen[(nb - lo) as usize] && self.occ[nb as usize] == Some(player) {
                     seen[(nb - lo) as usize] = true;
-                    touch |= boardgen::trinity_sides(self.side, nb);
+                    touch |= self.sides_of(nb);
                     stack.push(nb);
                 }
             }

@@ -284,7 +284,7 @@ impl Default for UiState {
             board_size: 91,
             pie_rule: false,
             ai_level: AiLevel::Standard,
-            ruleset: realmweave_core::TRINITY_Y_V4.to_string(),
+            ruleset: realmweave_core::TRIFORCE_V5.to_string(),
             world_seed: 0,
             server_addr: "127.0.0.1:8420".to_string(),
             room_code: String::new(),
@@ -322,6 +322,12 @@ struct Shapes {
 #[derive(Resource)]
 struct Palette {
     empty: Handle<StandardMaterial>,
+    /// Region-tinted empties for merged-field boards (triforce): the three
+    /// realm corners get faint identity colors; the weave-heart glows.
+    empty_heaven: Handle<StandardMaterial>,
+    empty_mortal: Handle<StandardMaterial>,
+    empty_underworld: Handle<StandardMaterial>,
+    empty_heart: Handle<StandardMaterial>,
     gate: Handle<StandardMaterial>,
     light: Handle<StandardMaterial>,
     dark: Handle<StandardMaterial>,

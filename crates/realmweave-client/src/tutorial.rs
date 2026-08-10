@@ -2,7 +2,7 @@
 //! a step panel whose progression is driven by the actual game state — the
 //! player learns by doing, not by reading.
 
-use realmweave_core::rules::TrinityY;
+use realmweave_core::rules::Triforce;
 use realmweave_core::{boardgen, Game, Move, NodeId, Player};
 
 /// Board-level guidance for the current step: nodes and edges to pulse.
@@ -77,10 +77,10 @@ impl TutorialState {
             .collect()
     }
 
-    /// Side length of the tutorial board.
+    /// Side length of the tutorial board (one merged triangle).
     fn side(game: &Game) -> usize {
-        let per_realm = game.board().node_count() / 3;
-        (((8 * per_realm + 1) as f64).sqrt() as usize - 1) / 2
+        let n = game.board().node_count();
+        (((8 * n + 1) as f64).sqrt() as usize - 1) / 2
     }
 
     /// Max number of distinct sides touched by any single human group.
@@ -97,16 +97,12 @@ impl TutorialState {
             }
             let mut stack = vec![start];
             visited[start as usize] = true;
-            let mut mask = boardgen::trinity_sides(side, start);
-            let realm = start as usize / (n / 3);
+            let mut mask = boardgen::triforce_sides(side, start);
             while let Some(cur) = stack.pop() {
                 for &nb in bd.neighbors(cur) {
-                    if nb as usize / (n / 3) != realm {
-                        continue;
-                    }
                     if !visited[nb as usize] && st.occupant(nb) == Some(self.human) {
                         visited[nb as usize] = true;
-                        mask |= boardgen::trinity_sides(side, nb);
+                        mask |= boardgen::triforce_sides(side, nb);
                         stack.push(nb);
                     }
                 }
@@ -125,12 +121,15 @@ impl TutorialState {
             Step::TouchTwoSides => (self.best_group_sides(game) >= 2).then_some(Step::Death),
             Step::Death => None, // button-driven
             Step::WinRealm => {
-                let won = (0..3).any(|r| {
-                    TrinityY::realm_winner(game.board(), game.state(), r) == Some(self.human)
-                });
-                won.then_some(Step::FinishGame)
+                // Weaving IS winning on the merged board; losing also ends
+                // the lesson (result present either way).
+                if Triforce::weaver(game.board(), game.state()) == Some(self.human) {
+                    Some(Step::Done)
+                } else {
+                    game.result().is_some().then_some(Step::FinishGame)
+                }
             }
-            Step::FinishGame => game.result().is_some().then_some(Step::Done),
+            Step::FinishGame => Some(Step::Done),
             Step::Done => None,
         };
         if let Some(n) = next {
@@ -155,12 +154,11 @@ impl TutorialState {
         match self.step {
             Step::Welcome => (
                 "欢迎来到 Realmweave",
-                "战场是三个三角形界域：天界、人间、冥界。\n\
+                "一整片大三角战场：三个角是天界、人间、冥界，\n\
+                 中央交汇之地是「织心」（微微发光的区域）。\n\
                  你执白（发光球体），AI 执黑（棱锥）。\n\n\
-                 目标：在一个界域里，用一条相连的棋链\n\
-                 同时触到三条边——这叫「织成」该界域。\n\
-                 先织成两个界域者获胜。\n\n\
-                 数学保证：每个界域最终必属一人，绝无和局。\n\
+                 目标：用一条相连的棋链同时触到大三角的三条边\n\
+                 ——编织成网即获胜。数学保证绝无和局。\n\
                  拖动旋转视角，滚轮缩放，V 切 2D 视图。"
                     .to_string(),
                 Some("开始 →"),
@@ -199,10 +197,10 @@ impl TutorialState {
                 Some("明白了 →"),
             ),
             Step::WinRealm => (
-                "织成一个界域",
-                "现在完成目标：让一条链同时触到本界域的三条边。\n\
-                 织成的界域会「封印」——其中棋子永久不朽，\n\
-                 界域关闭，战火转移到其余两界。\n\n\
+                "编织成网",
+                "现在完成目标：让一条链同时触到大三角的三条边。\n\
+                 每条边横跨两个界域，任何胜利之路都要穿越\n\
+                 多个界域、经过织心的争夺。\n\n\
                  注意 AI 也在织。挡它的每一颗子，\n\
                  天然也是你自己 Y 的一部分——攻即是防。"
                     .to_string(),
@@ -219,7 +217,7 @@ impl TutorialState {
             Step::Done => (
                 "教程完成",
                 match game.result() {
-                    Some(_) => "规则只有两条：Y 目标 + 死亡。\n\
+                    Some(_) => "规则只有两条：编织目标 + 死亡。\n\
                                 眼形、劫争、弃子、翻盘——全部从这两条涌现。\n\n\
                                 回到菜单，在完整尺寸的棋盘上试试，\n\
                                 或者看一场 AI 对弈演示。"
@@ -249,27 +247,17 @@ impl TutorialState {
         let n = bd.node_count();
         match self.step {
             Step::Welcome | Step::FirstStone => {
-                // pulse realm-0 interior (center play beats edge crawling)
-                for node in 0..(n / 3) as NodeId {
-                    if boardgen::trinity_sides(side, node) == 0 && st.occupant(node).is_none() {
+                // pulse the weave-heart: center play beats edge crawling
+                for node in 0..n as NodeId {
+                    if boardgen::triforce_region(side, node) == 3 && st.occupant(node).is_none() {
                         h.nodes.push(node);
                     }
                 }
             }
             Step::TouchTwoSides => {
-                // pulse empty side nodes of realms where the human has stones
-                let per = n / 3;
-                let mut realm_has_stones = [false; 3];
-                for m in 0..n as NodeId {
-                    if st.occupant(m) == Some(self.human) {
-                        realm_has_stones[m as usize / per] = true;
-                    }
-                }
+                // pulse empty side nodes of the big triangle
                 for node in 0..n as NodeId {
-                    if realm_has_stones[node as usize / per]
-                        && boardgen::trinity_sides(side, node) != 0
-                        && st.occupant(node).is_none()
-                    {
+                    if boardgen::triforce_sides(side, node) != 0 && st.occupant(node).is_none() {
                         h.nodes.push(node);
                     }
                 }

@@ -23,7 +23,12 @@ pub(crate) fn setup_camera(mut commands: Commands) {
         } else if let Some(rest) = v.strip_prefix("duel") {
             // RW_AUTOSTART=duel        → weave-layers-v3 exhibition
             // RW_AUTOSTART=duel:v4     → trinity-y-v4 exhibition
-            let (ruleset, def) = if rest == ":v4" {
+            let (ruleset, def) = if rest == ":v5" {
+                (
+                    realmweave_core::TRIFORCE_V5,
+                    boardgen::generate_triforce(22).expect("triforce board"),
+                )
+            } else if rest == ":v4" {
                 (
                     realmweave_core::TRINITY_Y_V4,
                     boardgen::generate_trinity(14).expect("trinity board"),
@@ -211,6 +216,10 @@ pub(crate) fn sync_board_visuals(
     if spawned.is_none() {
         let palette = Palette {
             empty: materials.add(node_material(Color::srgb(0.4, 0.42, 0.5), 0.05)),
+            empty_heaven: materials.add(node_material(Color::srgb(0.45, 0.48, 0.60), 0.05)),
+            empty_mortal: materials.add(node_material(Color::srgb(0.42, 0.52, 0.45), 0.05)),
+            empty_underworld: materials.add(node_material(Color::srgb(0.55, 0.44, 0.44), 0.05)),
+            empty_heart: materials.add(node_material(Color::srgb(0.62, 0.55, 0.72), 0.12)),
             gate: materials.add(node_material(Color::srgb(0.5, 0.55, 0.9), 0.4)),
             // Light = warm ivory-gold; Dark = vivid crimson. Chosen for
             // maximum separation from each other, the background, and the
@@ -354,6 +363,12 @@ pub(crate) fn sync_board_visuals(
         Default::default()
     };
     let last_placed = session.0.last_placed();
+    let is_triforce = game.config().ruleset_id == realmweave_core::TRIFORCE_V5;
+    let tf_side = if is_triforce {
+        (((8 * board.node_count() + 1) as f64).sqrt() as usize - 1) / 2
+    } else {
+        0
+    };
     // Placement pop animation: 0 → full scale over 0.25s after each move.
     let ply = game.state().ply;
     if anim.0 != ply {
@@ -405,6 +420,15 @@ pub(crate) fn sync_board_visuals(
             (Some(Player::Light), None) => &palette.light,
             (Some(Player::Dark), None) => &palette.dark,
             (None, _) if legal.contains(&id) => &palette.legal,
+            (None, _) if is_triforce => {
+                let side = tf_side;
+                match realmweave_core::boardgen::triforce_region(side, id) {
+                    0 => &palette.empty_heaven,
+                    1 => &palette.empty_mortal,
+                    2 => &palette.empty_underworld,
+                    _ => &palette.empty_heart,
+                }
+            }
             (None, _) if gates.contains(&id) => &palette.gate,
             (None, _) => &palette.empty,
         };

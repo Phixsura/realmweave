@@ -232,7 +232,9 @@ pub(crate) fn duel_turn(
             return;
         }
         duel.game_no += 1;
-        let def = if duel.ruleset == realmweave_core::TRINITY_Y_V4 {
+        let def = if duel.ruleset == realmweave_core::TRIFORCE_V5 {
+            boardgen::generate_triforce(22).expect("triforce board")
+        } else if duel.ruleset == realmweave_core::TRINITY_Y_V4 {
             boardgen::generate_trinity(14).expect("trinity board")
         } else {
             boardgen::generate_standard(duel.board_size).expect("standard size")

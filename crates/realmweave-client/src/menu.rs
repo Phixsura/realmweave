@@ -42,13 +42,17 @@ pub(crate) fn menu_ui(
                     ui.selectable_value(&mut ui_state.board_size, size, format!("{size} × 3"));
                 }
             });
-            if ui_state.ruleset == realmweave_core::TRINITY_Y_V4 {
-                ui.small("（三界Y使用固定的三角棋盘，此行选择不生效）");
+            if matches!(
+                ui_state.ruleset.as_str(),
+                realmweave_core::TRINITY_Y_V4 | realmweave_core::TRIFORCE_V5
+            ) {
+                ui.small("（三角棋盘尺寸由此行间接决定：越大越长局）");
             }
             ui.checkbox(&mut ui_state.pie_rule, "pie rule (second player may swap)");
             ui.horizontal(|ui| {
                 ui.label("rules");
                 for (id, label) in [
+                    (realmweave_core::TRIFORCE_V5, "织心 (v5)"),
                     (realmweave_core::TRINITY_Y_V4, "三界Y (v4)"),
                     (realmweave_core::WEAVE_LAYERS_V3, "层层编织"),
                     (realmweave_core::WEAVE_SEVER_V2, "weave&sever"),
@@ -75,7 +79,10 @@ pub(crate) fn menu_ui(
             }
 
             ui.heading("Local");
-            let seeded_boards = ui_state.ruleset != realmweave_core::TRINITY_Y_V4;
+            let seeded_boards = !matches!(
+                ui_state.ruleset.as_str(),
+                realmweave_core::TRINITY_Y_V4 | realmweave_core::TRIFORCE_V5
+            );
             if seeded_boards {
                 ui.horizontal(|ui| {
                     ui.label("world seed (0=classic)");
@@ -146,6 +153,9 @@ pub(crate) fn menu_ui(
                 }
             });
             ui.small(match ui_state.ruleset.as_str() {
+                realmweave_core::TRIFORCE_V5 => {
+                    "玩法：一条链触到大三角三边=编织成网获胜 · 三界+织心一体战场 · 无气之链被提"
+                }
                 realmweave_core::TRINITY_Y_V4 => {
                     "玩法：一条链触到界域三边=织成该界 · 先取两界胜 · 无气之链被提"
                 }
@@ -160,7 +170,9 @@ pub(crate) fn menu_ui(
                     .on_hover_text("两个 AI 慢速对弈，每手播报意图")
                     .clicked()
             {
-                let def = if ui_state.ruleset == realmweave_core::TRINITY_Y_V4 {
+                let def = if ui_state.ruleset == realmweave_core::TRIFORCE_V5 {
+                    boardgen::generate_triforce(22).expect("triforce board")
+                } else if ui_state.ruleset == realmweave_core::TRINITY_Y_V4 {
                     boardgen::generate_trinity(14).expect("trinity board")
                 } else {
                     boardgen::generate_standard(ui_state.board_size).expect("standard size")
@@ -192,9 +204,9 @@ pub(crate) fn menu_ui(
             {
                 start_hotseat(
                     &mut commands,
-                    19, // → triangle side 8 under the trinity ruleset
+                    19, // → merged-triangle side 10 under the flagship
                     false,
-                    realmweave_core::TRINITY_Y_V4,
+                    realmweave_core::TRIFORCE_V5,
                     0,
                     Some(Player::Light),
                 );
@@ -261,7 +273,17 @@ pub(crate) fn start_hotseat(
         ruleset: ruleset.to_string(),
         server_addr: prev_addr,
     });
-    let def = if ruleset == realmweave_core::TRINITY_Y_V4 {
+    let def = if ruleset == realmweave_core::TRIFORCE_V5 {
+        // merged-triangle side from the hex size pick (must be even)
+        let side = match size {
+            19 => 10,
+            37 => 14,
+            61 => 18,
+            91 => 22,
+            _ => 26,
+        };
+        boardgen::generate_triforce(side).expect("triforce board")
+    } else if ruleset == realmweave_core::TRINITY_Y_V4 {
         // triangle side from the hex size pick: 19→8, 37→11, 61→14, 91→16, 127→19
         let side = match size {
             19 => 8,
@@ -295,7 +317,9 @@ pub(crate) fn start_online_create(commands: &mut Commands, ui: &mut UiState) {
         server_addr: ui.server_addr.clone(),
     });
     let handle = net::connect(&ui.server_addr);
-    let board_id = if ui.ruleset == realmweave_core::TRINITY_Y_V4 {
+    let board_id = if ui.ruleset == realmweave_core::TRIFORCE_V5 {
+        "tf22-v5".to_string()
+    } else if ui.ruleset == realmweave_core::TRINITY_Y_V4 {
         "tri14-v4".to_string()
     } else {
         format!("hex{}-v1", ui.board_size)

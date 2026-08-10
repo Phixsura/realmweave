@@ -46,8 +46,8 @@ pub use board::{
 };
 pub use game::{Game, GameError, GameRecord};
 pub use rules::{
-    RuleError, RuleSet, WeaveRules, ALL_RULESETS, SEVER_V1, THREE_REALMS_V1, TRINITY_Y_V4,
-    WEAVE_LAYERS_V3, WEAVE_SEVER_V2,
+    RuleError, RuleSet, WeaveRules, ALL_RULESETS, SEVER_V1, THREE_REALMS_V1, TRIFORCE_V5,
+    TRINITY_Y_V4, WEAVE_LAYERS_V3, WEAVE_SEVER_V2,
 };
 pub use state::{GameConfig, GameResult, GameState, Move, TimeControl, WinReason};
 pub use validate::{validate_board, ValidationError};

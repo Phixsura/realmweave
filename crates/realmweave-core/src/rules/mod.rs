@@ -9,11 +9,13 @@
 
 mod classic;
 mod shared;
+mod triforce;
 mod trinity_y;
 mod weave_sever;
 
 pub use classic::WeaveRules;
 pub use shared::*;
+pub use triforce::Triforce;
 pub use trinity_y::TrinityY;
 pub use weave_sever::WeaveSeverV2;
 
@@ -28,8 +30,11 @@ pub const SEVER_V1: &str = "three-realms-sever-v1";
 pub const WEAVE_SEVER_V2: &str = "weave-sever-v2";
 /// Petrifying layer scoring (docs/design-weave-layers-v3.md).
 pub const WEAVE_LAYERS_V3: &str = "weave-layers-v3";
-/// Flagship: Y goal + liberties (docs/design-trinity-y-v4.md).
+/// Y goal + liberties on three separate triangles (docs/design-trinity-y-v4.md).
 pub const TRINITY_Y_V4: &str = "trinity-y-v4";
+/// Flagship: one merged battlefield — three realms + the weave-heart in a
+/// single great triangle, one Y wins (docs/design-triforce-v5.md).
+pub const TRIFORCE_V5: &str = "triforce-v5";
 
 /// Sever charges per player in the sever variant.
 pub const SEVER_CHARGES: u8 = 3;
@@ -123,12 +128,14 @@ pub fn ruleset_by_id(id: &str, pie_rule: bool) -> Result<Box<dyn RuleSet>, RuleE
             layers_to_win: LAYERS_TO_WIN,
         })),
         TRINITY_Y_V4 => Ok(Box::new(TrinityY { pie_rule })),
+        TRIFORCE_V5 => Ok(Box::new(Triforce { pie_rule })),
         other => Err(RuleError::UnknownRuleset(other.to_string())),
     }
 }
 
 /// All known ruleset ids (for tooling/UI).
-pub const ALL_RULESETS: [&str; 5] = [
+pub const ALL_RULESETS: [&str; 6] = [
+    TRIFORCE_V5,
     TRINITY_Y_V4,
     WEAVE_LAYERS_V3,
     WEAVE_SEVER_V2,
