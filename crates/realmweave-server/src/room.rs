@@ -48,9 +48,16 @@ pub struct Room {
     pub finished: bool,
     /// Result decided outside the rules engine (timeout).
     pub result_override: Option<GameResult>,
+    /// Last connect/move/disconnect activity (for the reaper).
+    pub last_activity: Instant,
 }
 
 impl Room {
+    /// Whether both seats are currently disconnected.
+    pub fn fully_disconnected(&self) -> bool {
+        self.light.tx.is_none() && self.dark.as_ref().map(|d| d.tx.is_none()).unwrap_or(true)
+    }
+
     /// Fresh room with Light seated.
     pub fn new(id: String, game_id: String, game: Game, light_token: String) -> Self {
         let time_control = game.config().time_control;
@@ -72,6 +79,7 @@ impl Room {
             started: false,
             finished: false,
             result_override: None,
+            last_activity: Instant::now(),
         }
     }
 

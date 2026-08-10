@@ -55,6 +55,33 @@ pub fn load_boards(dir: &str) -> HashMap<String, BoardDefinition> {
     boards
 }
 
+/// Periodically remove rooms that are finished (or never started) and have
+/// both seats disconnected for longer than the grace period. Without this a
+/// long-running server retains every room ever created.
+pub fn spawn_room_reaper(state: Shared) {
+    const SWEEP_EVERY: std::time::Duration = std::time::Duration::from_secs(60);
+    const GRACE: std::time::Duration = std::time::Duration::from_secs(15 * 60);
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(SWEEP_EVERY).await;
+            let mut rooms = state.rooms.lock().await;
+            let mut doomed = Vec::new();
+            for (code, room) in rooms.iter() {
+                let room = room.lock().await;
+                let idle = room.last_activity.elapsed() > GRACE;
+                let reapable = room.finished || !room.started;
+                if reapable && room.fully_disconnected() && idle {
+                    doomed.push(code.clone());
+                }
+            }
+            for code in doomed {
+                rooms.remove(&code);
+                tracing::info!(room = %code, "reaped idle room");
+            }
+        }
+    });
+}
+
 /// Build the axum application router.
 pub fn build_app(state: Shared) -> Router {
     Router::new()
@@ -203,6 +230,7 @@ async fn handle_socket(state: Shared, socket: WebSocket) {
     // Disconnect: mark the seat as away and notify the opponent.
     if let Some(Session { room, token }) = session {
         let mut room = room.lock().await;
+        room.last_activity = std::time::Instant::now();
         if let Some(seat) = room.seat_of_token(&token) {
             if let Some(s) = room.seat_mut(seat) {
                 s.tx = None;
@@ -436,6 +464,7 @@ async fn handle_message(
                     {
                         tracing::error!("persist event: {e}");
                     }
+                    room_guard.last_activity = std::time::Instant::now();
                     room_guard.broadcast(ServerMessage::MoveAccepted(event));
                     // Refresh both seats' view of which color they play.
                     for s in [Player::Light, Player::Dark] {
@@ -491,6 +520,7 @@ async fn play(
                 tracing::error!("persist event: {e}");
             }
             let result = room.result();
+            room.last_activity = std::time::Instant::now();
             room.broadcast(ServerMessage::MoveAccepted(event));
             if let Some(result) = result {
                 let clock = room.clock();

@@ -41,6 +41,7 @@ async fn main() {
         store,
     });
 
+    realmweave_server::spawn_room_reaper(state.clone());
     let app = build_app(state);
     let listener = tokio::net::TcpListener::bind(&args.listen)
         .await

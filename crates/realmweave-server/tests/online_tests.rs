@@ -427,3 +427,21 @@ async fn trinity_online_game_flows() {
         "occupied node rejected: {rejected:?}"
     );
 }
+
+/// The reaper's predicate: finished + fully disconnected + idle = reapable.
+#[tokio::test]
+async fn room_reaper_predicate() {
+    use realmweave_server::room::Room;
+    let def = boardgen::generate_standard(19).unwrap();
+    let board = realmweave_core::BoardGraph::new(def).unwrap();
+    let cfg = GameConfig::new(board.definition().id.clone());
+    let game = realmweave_core::Game::new(board, cfg).unwrap();
+    let mut room = Room::new("TEST42".into(), "g1".into(), game, "tok".into());
+    // Fresh room: light seat exists but disconnected, never started.
+    assert!(room.fully_disconnected());
+    assert!(!room.started);
+    // Connected seat blocks reaping.
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    room.light.tx = Some(tx);
+    assert!(!room.fully_disconnected());
+}
