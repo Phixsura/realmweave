@@ -193,6 +193,7 @@ pub(crate) fn menu_ui(
                     next_is_key: false,
                     last_layers: [0, 0],
                     last_captures: [0, 0],
+                    two_sides_announced: [false, false],
                     board_size: ui_state.board_size,
                     ruleset: ui_state.ruleset.clone(),
                 });

@@ -55,6 +55,7 @@ pub(crate) fn setup_camera(mut commands: Commands) {
                 next_is_key: false,
                 last_layers: [0, 0],
                 last_captures: [0, 0],
+                two_sides_announced: [false, false],
                 board_size: 91,
                 ruleset: ruleset.to_string(),
             });

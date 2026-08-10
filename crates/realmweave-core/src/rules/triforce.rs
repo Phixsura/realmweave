@@ -67,6 +67,34 @@ impl Triforce {
         None
     }
 
+    /// Best sides-touched count for `player` (0..=3) — the HUD's weave
+    /// progress meter. 3 = woven.
+    pub fn weave_progress(board: &BoardGraph, state: &GameState, player: Player) -> u32 {
+        let side = Self::side_of(board);
+        let n = board.node_count();
+        let mut visited = vec![false; n];
+        let mut best = 0u32;
+        for start in 0..n as NodeId {
+            if state.occupant(start) != Some(player) || visited[start as usize] {
+                continue;
+            }
+            let mut queue = VecDeque::from([start]);
+            visited[start as usize] = true;
+            let mut touch = crate::boardgen::triforce_sides(side, start);
+            while let Some(cur) = queue.pop_front() {
+                for &nb in board.neighbors(cur) {
+                    if !visited[nb as usize] && state.occupant(nb) == Some(player) {
+                        visited[nb as usize] = true;
+                        queue.push_back(nb);
+                        touch |= crate::boardgen::triforce_sides(side, nb);
+                    }
+                }
+            }
+            best = best.max(touch.count_ones());
+        }
+        best
+    }
+
     fn swap_available(&self, state: &GameState) -> bool {
         self.pie_rule && !state.swap_used && state.ply == 1 && state.to_move == Player::Dark
     }

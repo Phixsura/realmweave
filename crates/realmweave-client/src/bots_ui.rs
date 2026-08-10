@@ -246,6 +246,7 @@ pub(crate) fn duel_turn(
         push_commentary(&mut duel.commentary, opener);
         duel.last_layers = [0, 0];
         duel.last_captures = [0, 0];
+        duel.two_sides_announced = [false, false];
         *s = next;
         return;
     }
@@ -329,6 +330,20 @@ pub(crate) fn duel_turn(
         );
         duel.next_is_key = true;
         duel.last_captures = caps_now;
+    }
+    // Triforce weave threat: a group reaching its second side is the
+    // moment the endgame begins.
+    if s.game.config().ruleset_id == realmweave_core::TRIFORCE_V5 && s.result().is_none() {
+        use realmweave_core::rules::Triforce;
+        let prog = Triforce::weave_progress(&s.game.board().clone(), s.game.state(), mover);
+        if prog == 2 && !duel.two_sides_announced[player_idx(mover)] {
+            duel.two_sides_announced[player_idx(mover)] = true;
+            push_commentary(
+                &mut duel.commentary,
+                format!("🕸 {} 的织脉已触两边——只差最后一边！", mover.name()),
+            );
+            duel.next_is_key = true;
+        }
     }
     // Layer scored this move? (layers changed = petrification happened)
     let layers_now = s.game.state().layers;

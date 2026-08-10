@@ -126,6 +126,22 @@ pub(crate) fn game_hud(
             if charges != [0, 0] {
                 ui.label(format!("severs L:{} D:{}", charges[0], charges[1]));
             }
+            if s.game.config().ruleset_id == realmweave_core::TRIFORCE_V5 {
+                use realmweave_core::rules::Triforce;
+                let lw = Triforce::weave_progress(s.game.board(), s.game.state(), Player::Light);
+                let dw = Triforce::weave_progress(s.game.board(), s.game.state(), Player::Dark);
+                ui.label(
+                    egui::RichText::new(format!("🕸 织脉 白 {lw}/3 | 黑 {dw}/3"))
+                        .strong()
+                        .size(16.0),
+                );
+                if s.result().is_none() && lw == 2 {
+                    ui.colored_label(egui::Color32::GOLD, "白差一边！");
+                }
+                if s.result().is_none() && dw == 2 {
+                    ui.colored_label(egui::Color32::LIGHT_RED, "黑差一边！");
+                }
+            }
             if s.game.config().ruleset_id == realmweave_core::TRINITY_Y_V4 {
                 // Per-realm chips: sealed realms show their owner, live
                 // realms show who currently leads.
@@ -513,6 +529,25 @@ pub(crate) fn game_over_panel(
                     ui.label(format!(
                         "{name}: {}",
                         winner.map(|p| p.name()).unwrap_or("未分")
+                    ));
+                }
+            }
+            if ruleset == realmweave_core::TRIFORCE_V5 {
+                if let GameResult::Win { player, .. } = result {
+                    // Region composition of the winning position's stones.
+                    let bd = session.0.game.board();
+                    let st = session.0.game.state();
+                    let n = bd.node_count();
+                    let side = (((8 * n + 1) as f64).sqrt() as usize - 1) / 2;
+                    let mut counts = [0u32; 4];
+                    for id in 0..n as realmweave_core::NodeId {
+                        if st.occupant(id) == Some(player) {
+                            counts[realmweave_core::boardgen::triforce_region(side, id)] += 1;
+                        }
+                    }
+                    ui.label(format!(
+                        "胜方布阵：天{} 人{} 冥{} 织心{}",
+                        counts[0], counts[1], counts[2], counts[3]
                     ));
                 }
             }

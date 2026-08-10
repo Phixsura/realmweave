@@ -164,6 +164,8 @@ struct Duel {
     last_layers: [u8; 2],
     /// Capture totals after the previous move (to narrate deaths).
     last_captures: [u32; 2],
+    /// Whether each side's "two sides touched" moment was announced.
+    two_sides_announced: [bool; 2],
     /// Board settings to restart the next game with.
     board_size: usize,
     ruleset: String,

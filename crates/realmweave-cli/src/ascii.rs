@@ -8,6 +8,9 @@ use realmweave_core::{Game, Player, Realm};
 pub fn render(game: &Game) -> String {
     let board = game.board();
     let def = board.definition();
+    if def.id.starts_with("tf") {
+        return render_triforce(game);
+    }
     if def.id.starts_with("tri") {
         return render_trinity(game);
     }
@@ -141,6 +144,48 @@ fn render_trinity(game: &Game) -> String {
             let empty = String::new();
             let line = block.get(i).unwrap_or(&empty);
             out.push_str(&format!("{line:<width$}   "));
+        }
+        out.push('\n');
+    }
+    out
+}
+
+/// Triforce: one big triangle. `L`/`D` stones; empties show region —
+/// `.` realm interior, `,` weave-heart, `·` big-triangle side cells.
+fn render_triforce(game: &Game) -> String {
+    let board = game.board();
+    let def = board.definition();
+    let state = game.state();
+    let n = def.nodes.len();
+    let side = (((8 * n + 1) as f64).sqrt() as usize - 1) / 2;
+    let index = board.axial_index();
+    let mut out = String::new();
+    for r in 0..side {
+        out.push_str(&" ".repeat(side - r));
+        for c in 0..=r {
+            // realm tags vary; look the id up across all realms
+            let id = Realm::ALL
+                .iter()
+                .find_map(|&rm| index.get(&(rm, [r as i32, c as i32])))
+                .copied();
+            let ch = match id {
+                Some(id) => match state.occupant(id) {
+                    Some(Player::Light) => 'L',
+                    Some(Player::Dark) => 'D',
+                    None => {
+                        if realmweave_core::boardgen::triforce_sides(side, id) != 0 {
+                            '·'
+                        } else if realmweave_core::boardgen::triforce_region(side, id) == 3 {
+                            ','
+                        } else {
+                            '.'
+                        }
+                    }
+                },
+                None => '?',
+            };
+            out.push(ch);
+            out.push(' ');
         }
         out.push('\n');
     }
