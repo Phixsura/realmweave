@@ -335,3 +335,33 @@ fn occupant_out_of_range_is_empty() {
     assert_eq!(state.occupant(4), None); // OOB
     assert_eq!(state.occupant(u16::MAX), None);
 }
+
+/// Records pin board CONTENT, not just the id: a drifted board refuses
+/// to replay instead of silently producing a different game.
+#[test]
+fn board_drift_detected_on_replay() {
+    let def = realmweave_core::boardgen::generate_triforce(8).unwrap();
+    let board = realmweave_core::BoardGraph::new(def.clone()).unwrap();
+    let cfg =
+        realmweave_core::GameConfig::new(def.id.clone()).with_ruleset(realmweave_core::TRIFORCE_V5);
+    let mut game = realmweave_core::Game::new(board, cfg).unwrap();
+    let mv = game
+        .legal_moves()
+        .into_iter()
+        .find(|m| matches!(m, realmweave_core::Move::Place(_)))
+        .unwrap();
+    game.play(mv).unwrap();
+    let record = game.record();
+    assert!(record.board_fingerprint.is_some());
+    // Same board: replays fine.
+    let b2 = realmweave_core::BoardGraph::new(def.clone()).unwrap();
+    realmweave_core::Game::replay_record(b2, &record).unwrap();
+    // Drifted board (one edge removed): refused.
+    let mut drifted = def.clone();
+    drifted.edges.pop();
+    let b3 = realmweave_core::BoardGraph::new(drifted).unwrap();
+    assert!(matches!(
+        realmweave_core::Game::replay_record(b3, &record),
+        Err(realmweave_core::GameError::BoardDrift { .. })
+    ));
+}

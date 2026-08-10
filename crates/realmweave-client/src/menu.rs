@@ -426,7 +426,7 @@ pub(crate) fn resume_saved(commands: &mut Commands, ui: &mut UiState) {
             return;
         }
     };
-    match realmweave_core::Game::replay(board, record.config.clone(), &record.moves) {
+    match realmweave_core::Game::replay_record(board, &record) {
         Ok(game) => {
             let human = game.to_move();
             let board2 = BoardGraph::new(game.board().definition().clone()).expect("round-trip");

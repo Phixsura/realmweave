@@ -167,6 +167,29 @@ impl BoardDefinition {
             .collect()
     }
 
+    /// Content fingerprint: hash of nodes/edges/origins (not id/version).
+    /// Records carry this so a future generator change that silently
+    /// alters a board's content is DETECTED at replay time instead of
+    /// producing a subtly different game.
+    pub fn fingerprint(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        for n in &self.nodes {
+            n.id.hash(&mut h);
+            n.realm.hash(&mut h);
+            n.axial.map(|a| (a[0], a[1])).hash(&mut h);
+        }
+        for e in &self.edges {
+            e.key().hash(&mut h);
+            e.kind.hash(&mut h);
+        }
+        for o in &self.origins {
+            o.player.hash(&mut h);
+            o.node.hash(&mut h);
+        }
+        h.finish()
+    }
+
     /// All nodes that are endpoints of portal edges ("gates").
     pub fn gate_nodes(&self) -> Vec<NodeId> {
         let mut gates: Vec<NodeId> = self

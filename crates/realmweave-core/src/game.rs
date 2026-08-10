@@ -10,6 +10,13 @@ use crate::state::{GameConfig, GameResult, GameState, Move};
 /// Errors from [`Game`] operations.
 #[derive(Debug, thiserror::Error)]
 pub enum GameError {
+    /// Record's board fingerprint doesn't match the regenerated board:
+    /// the generator changed since the game was played.
+    #[error("board {board} content changed since this record was made (generator drift)")]
+    BoardDrift {
+        /// The board id whose content no longer matches.
+        board: String,
+    },
     /// The ruleset rejected a move.
     #[error(transparent)]
     Rule(#[from] RuleError),
@@ -41,6 +48,11 @@ pub enum GameError {
 pub struct GameRecord {
     /// Match configuration (ruleset id, board id, options).
     pub config: GameConfig,
+    /// Content fingerprint of the board this was played on (None on
+    /// records predating the field). Checked on replay: a mismatch means
+    /// the generator changed and the record is unsafe to trust.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub board_fingerprint: Option<u64>,
     /// Ordered move log.
     pub moves: Vec<Move>,
     /// Result, if the game ended.
@@ -172,6 +184,7 @@ impl Game {
     pub fn record(&self) -> GameRecord {
         GameRecord {
             config: self.config.clone(),
+            board_fingerprint: Some(self.board.definition().fingerprint()),
             moves: self.state.move_log.clone(),
             result: self.state.result,
         }
@@ -188,5 +201,20 @@ impl Game {
             game.play(*mv)?;
         }
         Ok(game)
+    }
+
+    /// Replay a full record with board-content verification: if the record
+    /// carries a fingerprint and the provided board doesn't match, the
+    /// replay is refused — a silent generator drift would otherwise
+    /// reproduce a subtly different game.
+    pub fn replay_record(board: BoardGraph, record: &GameRecord) -> Result<Self, GameError> {
+        if let Some(fp) = record.board_fingerprint {
+            if board.definition().fingerprint() != fp {
+                return Err(GameError::BoardDrift {
+                    board: board.definition().id.clone(),
+                });
+            }
+        }
+        Self::replay(board, record.config.clone(), &record.moves)
     }
 }

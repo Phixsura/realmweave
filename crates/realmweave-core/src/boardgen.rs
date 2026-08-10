@@ -536,6 +536,12 @@ pub fn resolve(board_id: &str) -> Option<BoardDefinition> {
         if let Some(size) = rest.strip_suffix("-v1").and_then(|s| s.parse().ok()) {
             return generate_standard(size);
         }
+        // Seeded worlds: hex{size}-s{seed} regenerates deterministically.
+        if let Some((size, seed)) = rest.split_once("-s") {
+            if let (Ok(size), Ok(seed)) = (size.parse(), seed.parse()) {
+                return generate_seeded(size, seed);
+            }
+        }
     }
     if let Some(rest) = board_id.strip_prefix("tri") {
         if let Some(side) = rest.strip_suffix("-v4").and_then(|s| s.parse().ok()) {

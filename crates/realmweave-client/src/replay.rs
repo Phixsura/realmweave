@@ -80,7 +80,14 @@ impl ReplayState {
 
     fn build(record: &GameRecord, upto: usize) -> Result<Game, String> {
         let board = Self::board(record)?;
-        Game::replay(board, record.config.clone(), &record.moves[..upto]).map_err(|e| e.to_string())
+        // Full-record cursor positions verify the board fingerprint once
+        // (partial replays share the same board object).
+        if upto == record.moves.len() {
+            Game::replay_record(board, record).map_err(|e| e.to_string())
+        } else {
+            Game::replay(board, record.config.clone(), &record.moves[..upto])
+                .map_err(|e| e.to_string())
+        }
     }
 
     /// Game state at the current cursor.
