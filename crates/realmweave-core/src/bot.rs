@@ -171,14 +171,102 @@ fn route_avoiding(
 
 /// Redundancy-aware cost to link all origin pairs (lower = healthier).
 /// Public so UIs can narrate how a move changed each side's position.
+/// For trinity boards (no origins) this is the Y-connection cost summed
+/// over realms instead.
 pub fn link_cost(game: &Game, player: Player) -> i64 {
     let bd = game.board();
     let origins = bd.definition().origins_of(player);
+    if origins.is_empty() {
+        return trinity_cost(game, player);
+    }
     let mut total = 0i64;
     for i in 0..origins.len() {
         for j in (i + 1)..origins.len() {
             total += pair_cost(game, player, origins[i], origins[j]);
         }
+    }
+    total
+}
+
+/// Trinity Y: per realm, the cheapest tree linking all three sides
+/// (approximated as min over side-A nodes of dist(A→B) + dist(A→C) style
+/// multi-source BFS: cost from each side, summed at the best junction).
+fn trinity_cost(game: &Game, player: Player) -> i64 {
+    let bd = game.board();
+    let n = bd.node_count();
+    let per_realm = n / 3;
+    let side_len = (((8 * per_realm + 1) as f64).sqrt() as usize - 1) / 2;
+    let mut total = 0i64;
+    for realm in 0..3 {
+        let lo = (realm * per_realm) as NodeId;
+        let hi = lo + per_realm as NodeId;
+        // dist from each of the 3 sides via 0/1-BFS
+        let mut dists: Vec<Vec<i64>> = Vec::new();
+        for side_bit in [1u8, 2, 4] {
+            let mut dist = vec![i64::MAX; n];
+            let mut dq = std::collections::VecDeque::new();
+            for start in lo..hi {
+                if crate::boardgen::trinity_sides(side_len, start) & side_bit == 0 {
+                    continue;
+                }
+                let c = match game.state().occupant(start) {
+                    Some(p) if p == player => 0,
+                    None => 1,
+                    _ => continue,
+                };
+                if c < dist[start as usize] {
+                    dist[start as usize] = c;
+                    if c == 0 {
+                        dq.push_front(start);
+                    } else {
+                        dq.push_back(start);
+                    }
+                }
+            }
+            while let Some(cur) = dq.pop_front() {
+                for &nb in bd.neighbors(cur) {
+                    if nb < lo || nb >= hi {
+                        continue;
+                    }
+                    let c = match game.state().occupant(nb) {
+                        Some(p) if p == player => 0,
+                        None => 1,
+                        _ => continue,
+                    };
+                    let nd = dist[cur as usize] + c;
+                    if nd < dist[nb as usize] {
+                        dist[nb as usize] = nd;
+                        if c == 0 {
+                            dq.push_front(nb);
+                        } else {
+                            dq.push_back(nb);
+                        }
+                    }
+                }
+            }
+            dists.push(dist);
+        }
+        // best junction node
+        let mut best = 200i64;
+        for v in lo..hi {
+            let (a, b, c) = (
+                dists[0][v as usize],
+                dists[1][v as usize],
+                dists[2][v as usize],
+            );
+            if a == i64::MAX || b == i64::MAX || c == i64::MAX {
+                continue;
+            }
+            // junction counted once if empty
+            let overlap = match game.state().occupant(v) {
+                None => 2,
+                _ => 0,
+            };
+            best = best.min(a + b + c - overlap);
+        }
+        // realm already won by me = 0; by opponent = full penalty handled
+        // naturally (no junction reachable → 200)
+        total += best;
     }
     total
 }
@@ -263,8 +351,16 @@ fn candidates(game: &Game, me: Player) -> Vec<Move> {
         }
     }
     if out.is_empty() {
-        // opening: play near own origins/gates
-        for &o in &bd.definition().origins_of(me) {
+        // opening: play near own origins/gates (trinity: anywhere)
+        let origins = bd.definition().origins_of(me);
+        if origins.is_empty() {
+            for n in 0..bd.node_count() as NodeId {
+                if st.occupant(n).is_none() {
+                    out.push(Move::Place(n));
+                }
+            }
+        }
+        for &o in &origins {
             for nb in bd.live_neighbors(o, &st.cut_edges) {
                 if st.occupant(nb).is_none() && !st.is_petrified(nb) {
                     out.push(Move::Place(nb));
@@ -455,6 +551,10 @@ pub fn choose_move(game: &Game, seed: u64) -> Option<Move> {
 pub fn supports(ruleset_id: &str) -> bool {
     matches!(
         ruleset_id,
-        rules::WEAVE_SEVER_V2 | rules::WEAVE_LAYERS_V3 | rules::THREE_REALMS_V1 | rules::SEVER_V1
+        rules::WEAVE_SEVER_V2
+            | rules::WEAVE_LAYERS_V3
+            | rules::TRINITY_Y_V4
+            | rules::THREE_REALMS_V1
+            | rules::SEVER_V1
     )
 }

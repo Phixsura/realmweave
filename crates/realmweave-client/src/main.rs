@@ -385,7 +385,17 @@ fn start_hotseat(
     world_seed: u64,
     human_vs_bot: Option<Player>,
 ) {
-    let def = if world_seed == 0 {
+    let def = if ruleset == realmweave_core::TRINITY_Y_V4 {
+        // triangle side from the hex size pick: 19→8, 37→11, 61→14, 91→16, 127→19
+        let side = match size {
+            19 => 8,
+            37 => 11,
+            61 => 14,
+            91 => 16,
+            _ => 19,
+        };
+        boardgen::generate_trinity(side).expect("trinity board")
+    } else if world_seed == 0 {
         boardgen::generate_standard(size).expect("standard size")
     } else {
         boardgen::generate_seeded(size, world_seed).expect("seeded board")
@@ -1239,6 +1249,7 @@ fn menu_ui(mut commands: Commands, mut egui_ctx: EguiContexts, mut ui_state: Res
             ui.horizontal(|ui| {
                 ui.label("rules");
                 for (id, label) in [
+                    (realmweave_core::TRINITY_Y_V4, "三界Y (v4)"),
                     (realmweave_core::WEAVE_LAYERS_V3, "层层编织"),
                     (realmweave_core::WEAVE_SEVER_V2, "weave&sever"),
                     (realmweave_core::THREE_REALMS_V1, "classic"),
@@ -1586,6 +1597,14 @@ fn game_hud(
             let charges = s.game.state().sever_charges;
             if charges != [0, 0] {
                 ui.label(format!("severs L:{} D:{}", charges[0], charges[1]));
+            }
+            if s.game.config().ruleset_id == realmweave_core::TRINITY_Y_V4 {
+                let ly = s.game.state().layers;
+                ui.label(
+                    egui::RichText::new(format!("⚖ 界域 白 {} | 黑 {} （先取两界胜）", ly[0], ly[1]))
+                        .strong()
+                        .size(16.0),
+                );
             }
             if s.game.config().ruleset_id == realmweave_core::WEAVE_LAYERS_V3 {
                 let ly = s.game.state().layers;

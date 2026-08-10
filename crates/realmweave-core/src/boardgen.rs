@@ -425,3 +425,95 @@ fn try_seeded(
     crate::validate::validate_board(&def).ok()?;
     Some(def)
 }
+
+// ------------------------------------------------------------- trinity-y ---
+
+/// v4 "Trinity Y" board: three TRIANGULAR realms. In each realm the goal is
+/// the game of Y — connect all three sides with one group. The Y theorem
+/// guarantees a full triangle has exactly one Y-winner, so every realm is
+/// decisive and the match (best of three realms) can never be drawn.
+///
+/// Triangle coordinates: rows 0..side, row r has r+1 cells; realm-major ids.
+/// Sides: 0 = left (c==0), 1 = right (c==r), 2 = bottom (r==side-1).
+/// No origins (goals are the sides themselves), no portals in v4.0 —
+/// coupling between realms is pure tempo: one stone per turn, any realm.
+pub fn generate_trinity(side: usize) -> Option<BoardDefinition> {
+    if !(4..=26).contains(&side) {
+        return None;
+    }
+    let per_realm = side * (side + 1) / 2;
+    let mut nodes = Vec::new();
+    let mut edges = Vec::new();
+    let index = |realm: usize, r: usize, c: usize| -> NodeId {
+        (realm * per_realm + r * (r + 1) / 2 + c) as NodeId
+    };
+    for (ri, realm) in Realm::ALL.iter().enumerate() {
+        let y = realm_y(*realm);
+        for r in 0..side {
+            for c in 0..=r {
+                // equilateral layout: row r spans width r
+                let x = c as f32 - r as f32 / 2.0;
+                let z = r as f32 * 0.866;
+                nodes.push(Node {
+                    id: index(ri, r, c),
+                    realm: *realm,
+                    position: [x, y, z - side as f32 * 0.433],
+                    axial: Some([r as i32, c as i32]),
+                });
+            }
+        }
+        for r in 0..side {
+            for c in 0..=r {
+                let a = index(ri, r, c);
+                // right neighbor, and the two "children" below
+                if c < r {
+                    edges.push(Edge {
+                        a,
+                        b: index(ri, r, c + 1),
+                        kind: EdgeKind::IntraRealm,
+                    });
+                }
+                if r + 1 < side {
+                    edges.push(Edge {
+                        a,
+                        b: index(ri, r + 1, c),
+                        kind: EdgeKind::IntraRealm,
+                    });
+                    edges.push(Edge {
+                        a,
+                        b: index(ri, r + 1, c + 1),
+                        kind: EdgeKind::IntraRealm,
+                    });
+                }
+            }
+        }
+    }
+    Some(BoardDefinition {
+        id: format!("tri{side}-v4"),
+        version: 1,
+        nodes,
+        edges,
+        origins: Vec::new(),
+    })
+}
+
+/// Which sides of its triangular realm a trinity node lies on (bitmask:
+/// 1 = left, 2 = right, 4 = bottom). Zero for interior nodes.
+pub fn trinity_sides(side: usize, node: NodeId) -> u8 {
+    let per_realm = side * (side + 1) / 2;
+    let local = node as usize % per_realm;
+    // invert triangular number: r = floor((sqrt(8*local+1)-1)/2)
+    let r = ((((8 * local + 1) as f64).sqrt() - 1.0) / 2.0) as usize;
+    let c = local - r * (r + 1) / 2;
+    let mut mask = 0u8;
+    if c == 0 {
+        mask |= 1;
+    }
+    if c == r {
+        mask |= 2;
+    }
+    if r == side - 1 {
+        mask |= 4;
+    }
+    mask
+}

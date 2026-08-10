@@ -22,7 +22,7 @@ pub use game::{Game, GameError, GameRecord};
 pub use rules::{
     supply_score, supply_territory_nodes, RuleError, RuleSet, SupplyScore, WeaveRules,
     ALL_RULESETS, DOUBLE_WEAVE_V1, SEVER_V1, SUPPLY_RANGE_V1, SUPPLY_V1, TERRITORY_V1,
-    THREE_REALMS_V1, WEAVE_LAYERS_V3, WEAVE_SEVER_V2,
+    THREE_REALMS_V1, TRINITY_Y_V4, WEAVE_LAYERS_V3, WEAVE_SEVER_V2,
 };
 pub use state::{GameConfig, GameResult, GameState, Move, TimeControl, WinReason};
 pub use validate::{validate_board, ValidationError};
