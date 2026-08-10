@@ -56,9 +56,8 @@ pub const REINFORCED_RESIST: f32 = 0.35;
 pub const DISCHARGE_RANGE: u32 = 2;
 
 // --- victory/defeat ---
-/// Survive this long (25 min default game).
-pub const GAME_LENGTH_TICKS: u64 = 1500 * TICKS_PER_SEC as u64 / 60 * 60; // 15000 = 25min? keep simple:
-pub const GAME_LENGTH_SECS: u64 = 900; // 15 minutes for the graybox
+/// Survive this long (graybox: 15 minutes).
+pub const GAME_LENGTH_SECS: u64 = 900;
 /// Defeat: void this deep sitting ON the core.
 pub const CORE_DROWN_LEVEL: f32 = 6.0;
 /// ... for this long continuously.
@@ -240,17 +239,16 @@ pub fn tick(map: &SupplyMap, s: &mut FieldState, commands: &[Command]) {
     }
 
     // -------------------------------------------------- construction ---
-    let mut refresh = false;
+    // (The light network recomputes every tick, so completion needs no
+    // explicit refresh.)
     for link in s.links.iter_mut() {
         if let LinkState::Building(t) = link {
             *t -= 1;
             if *t == 0 {
                 *link = LinkState::Single;
-                refresh = true;
             }
         }
     }
-    let _ = refresh; // network recomputes every tick anyway
 
     // ------------------------------------------------- void dynamics ---
     let mut nv = s.void.clone();

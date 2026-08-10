@@ -473,14 +473,19 @@ fn sw_hud(
     edges: Query<Entity, With<SwEdge>>,
 ) {
     let ctx = egui_ctx.ctx_mut();
-    let map = session.map.clone();
-    let s = session.state.clone();
-    let paused = session.paused;
-    let autopilot = session.autopilot;
     let mut toggle_pause = false;
     let mut toggle_ap = false;
+    let mut restart_seed: Option<u64> = None;
+    // Hot path reads through a scoped shared borrow — the per-frame
+    // SupplyMap/FieldState clones were pure allocation churn.
+    {
+        let session_ref = &*session;
+        let map = &session_ref.map;
+        let s = &session_ref.state;
+        let paused = session_ref.paused;
+        let autopilot = session_ref.autopilot;
 
-    egui::TopBottomPanel::top("sw_hud").show(ctx, |ui| {
+        egui::TopBottomPanel::top("sw_hud").show(ctx, |ui| {
         ui.horizontal(|ui| {
             ui.label(egui::RichText::new("Supply War · 虚空场").strong());
             ui.separator();
@@ -488,7 +493,7 @@ fn sw_hud(
                 "⚡ {:.0}/{:.0} (+{:.1}/s)",
                 s.energy,
                 field::ENERGY_CAP,
-                s.income_per_sec(&map)
+                s.income_per_sec(map)
             ));
             ui.separator();
             let remain = field::GAME_LENGTH_SECS as f32 - s.seconds();
@@ -542,57 +547,61 @@ fn sw_hud(
             ));
         });
     });
+        if let Some(outcome) = s.outcome {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::none().fill(egui::Color32::from_black_alpha(160)))
+                .show(ctx, |ui| {
+                    ui.vertical_centered(|ui| {
+                        ui.add_space(120.0);
+                        let (title, color) = match outcome {
+                            Outcome::Victory { wells_lit } => (
+                                format!("守住了黎明 —— {wells_lit} 口井仍在燃烧"),
+                                egui::Color32::GOLD,
+                            ),
+                            Outcome::Defeat { .. } => {
+                                ("母核沉入虚空".to_string(), egui::Color32::LIGHT_RED)
+                            }
+                        };
+                        ui.label(egui::RichText::new(title).size(34.0).color(color));
+                        ui.add_space(10.0);
+                        let quakes: Vec<u32> = s
+                            .events
+                            .iter()
+                            .filter_map(|e| match e {
+                                FieldEvent::Avalanche { size, .. } => Some(*size),
+                                _ => None,
+                            })
+                            .collect();
+                        let biggest = quakes.iter().max().copied().unwrap_or(0);
+                        ui.label(format!(
+                            "历经 {:.0}s | 雪崩 {} 次，最大 {} 节点连锁",
+                            s.seconds(),
+                            quakes.len(),
+                            biggest
+                        ));
+                        ui.add_space(14.0);
+                        ui.horizontal(|ui| {
+                            ui.add_space(ui.available_width() / 2.0 - 130.0);
+                            if ui.button("同种子再来").clicked() {
+                                restart_seed = Some(session_ref.seed);
+                            }
+                            if ui.button("换个世界").clicked() {
+                                restart_seed = Some(session_ref.seed.wrapping_add(1));
+                            }
+                        });
+                    });
+                });
+        }
+    } // end shared borrow
+
     if toggle_pause {
         session.paused = !session.paused;
     }
     if toggle_ap {
         session.autopilot = !session.autopilot;
     }
-
-    if let Some(outcome) = s.outcome {
-        egui::CentralPanel::default()
-            .frame(egui::Frame::none().fill(egui::Color32::from_black_alpha(160)))
-            .show(ctx, |ui| {
-                ui.vertical_centered(|ui| {
-                    ui.add_space(120.0);
-                    let (title, color) = match outcome {
-                        Outcome::Victory { wells_lit } => (
-                            format!("守住了黎明 —— {wells_lit} 口井仍在燃烧"),
-                            egui::Color32::GOLD,
-                        ),
-                        Outcome::Defeat { .. } => {
-                            ("母核沉入虚空".to_string(), egui::Color32::LIGHT_RED)
-                        }
-                    };
-                    ui.label(egui::RichText::new(title).size(34.0).color(color));
-                    ui.add_space(10.0);
-                    let quakes: Vec<u32> = s
-                        .events
-                        .iter()
-                        .filter_map(|e| match e {
-                            FieldEvent::Avalanche { size, .. } => Some(*size),
-                            _ => None,
-                        })
-                        .collect();
-                    let biggest = quakes.iter().max().copied().unwrap_or(0);
-                    ui.label(format!(
-                        "历经 {:.0}s | 雪崩 {} 次，最大 {} 节点连锁",
-                        s.seconds(),
-                        quakes.len(),
-                        biggest
-                    ));
-                    ui.add_space(14.0);
-                    ui.horizontal(|ui| {
-                        ui.add_space(ui.available_width() / 2.0 - 130.0);
-                        if ui.button("同种子再来").clicked() {
-                            restart(&mut commands, session.seed, &nodes, &edges);
-                        }
-                        if ui.button("换个世界").clicked() {
-                            restart(&mut commands, session.seed.wrapping_add(1), &nodes, &edges);
-                        }
-                    });
-                });
-            });
+    if let Some(seed) = restart_seed {
+        restart(&mut commands, seed, &nodes, &edges);
     }
 }
 
