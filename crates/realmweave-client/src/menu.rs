@@ -210,7 +210,7 @@ pub(crate) fn menu_ui(
                 }
             });
             ui.add_space(12.0);
-            ui.heading("Replay");
+            ui.heading("Replay / 续局");
             ui.horizontal(|ui| {
                 ui.label("record file");
                 ui.text_edit_singleline(&mut ui_state.replay_path);
@@ -219,6 +219,13 @@ pub(crate) fn menu_ui(
                 }
                 if ui.button("Demo (30s/move)").clicked() {
                     start_replay(&mut commands, &mut ui_state, 30.0);
+                }
+                if ui
+                    .button("▶ 续下")
+                    .on_hover_text("从棋谱恢复为可继续的对局（未终局的存档）")
+                    .clicked()
+                {
+                    resume_saved(&mut commands, &mut ui_state);
                 }
             });
             if !ui_state.status.is_empty() {
@@ -340,4 +347,73 @@ pub(crate) fn start_online_join(commands: &mut Commands, ui: &mut UiState) {
     commands.insert_resource(ServerAddr(ui.server_addr.clone()));
     commands.insert_resource(Active);
     ui.status.clear();
+}
+
+/// Resume a saved (possibly unfinished) game record as a live vs-AI
+/// session: the human takes whichever color is to move.
+pub(crate) fn resume_saved(commands: &mut Commands, ui: &mut UiState) {
+    let text = match std::fs::read_to_string(&ui.replay_path) {
+        Ok(t) => t,
+        Err(e) => {
+            ui.status = format!("{}: {e}", ui.replay_path);
+            return;
+        }
+    };
+    let record: realmweave_core::GameRecord = match serde_json::from_str(&text) {
+        Ok(r) => r,
+        Err(e) => {
+            ui.status = format!("invalid record: {e}");
+            return;
+        }
+    };
+    let def = if record.config.board_id.starts_with("tri") {
+        let side = record
+            .config
+            .board_id
+            .trim_start_matches("tri")
+            .split('-')
+            .next()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(14);
+        boardgen::generate_trinity(side)
+    } else {
+        let size = record
+            .config
+            .board_id
+            .trim_start_matches("hex")
+            .split('-')
+            .next()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(91);
+        boardgen::generate_standard(size)
+    };
+    let Some(def) = def else {
+        ui.status = format!("unknown board {}", record.config.board_id);
+        return;
+    };
+    let board = match BoardGraph::new(def) {
+        Ok(b) => b,
+        Err(e) => {
+            ui.status = e.to_string();
+            return;
+        }
+    };
+    match realmweave_core::Game::replay(board, record.config.clone(), &record.moves) {
+        Ok(game) => {
+            let human = game.to_move();
+            let board2 = BoardGraph::new(game.board().definition().clone()).expect("round-trip");
+            let mut session = Session::hotseat_with_rules(
+                board2,
+                record.config.pie_rule,
+                &record.config.ruleset_id,
+            );
+            session.game = game;
+            session.control = Control::VsBot(human);
+            commands.insert_resource(GameSession(session));
+            commands.insert_resource(Net(None));
+            commands.insert_resource(Active);
+            ui.status.clear();
+        }
+        Err(e) => ui.status = format!("record does not replay: {e}"),
+    }
 }

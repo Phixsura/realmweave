@@ -110,21 +110,35 @@ pub(crate) fn game_hud(
                 if s.result().is_none() && ui.button("resign").clicked() {
                     events.send(IntentEvent(PlayerIntent::Resign));
                 }
+                // Local undo: hot-seat takes back one move; vs-AI takes back
+                // the human's move AND the AI's reply. Never online.
+                let local_live = matches!(s.connection, Connection::Local)
+                    && !matches!(s.control, Control::Observer | Control::BotDuel)
+                    && !s.game.state().move_log.is_empty();
+                if local_live && ui.button("↩ 悔棋").clicked() {
+                    events.send(IntentEvent(PlayerIntent::Undo));
+                }
             }
             let charges = s.game.state().sever_charges;
             if charges != [0, 0] {
                 ui.label(format!("severs L:{} D:{}", charges[0], charges[1]));
             }
             if s.game.config().ruleset_id == realmweave_core::TRINITY_Y_V4 {
-                let ly = s.game.state().layers;
-                ui.label(
-                    egui::RichText::new(format!(
-                        "⚖ 界域 白 {} | 黑 {} （先取两界胜）",
-                        ly[0], ly[1]
-                    ))
-                    .strong()
-                    .size(16.0),
-                );
+                // Per-realm chips: sealed realms show their owner, live
+                // realms show who currently leads.
+                for (i, name) in ["天", "人", "冥"].iter().enumerate() {
+                    let winner = realmweave_core::rules::TrinityY::realm_winner(
+                        s.game.board(),
+                        s.game.state(),
+                        i,
+                    );
+                    let (text, color) = match winner {
+                        Some(Player::Light) => (format!("{name}⛨白"), egui::Color32::GOLD),
+                        Some(Player::Dark) => (format!("{name}⛨黑"), egui::Color32::LIGHT_RED),
+                        None => (format!("{name}·争"), egui::Color32::GRAY),
+                    };
+                    ui.colored_label(color, text);
+                }
             }
             if s.game.config().ruleset_id == realmweave_core::WEAVE_LAYERS_V3 {
                 let ly = s.game.state().layers;
@@ -418,5 +432,117 @@ pub(crate) fn tutorial_panel(
                     commands.remove_resource::<Tutorial>();
                 }
             });
+        });
+}
+
+/// Game-over modal: result, per-realm outcome, and next actions. Local
+/// modes offer save/rematch; online games just surface the result.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn game_over_panel(
+    mut commands: Commands,
+    mut egui_ctx: EguiContexts,
+    mut session: ResMut<GameSession>,
+    mut ui_state: ResMut<UiState>,
+    duel: Option<Res<Duel>>,
+    tut: Option<Res<Tutorial>>,
+    nodes: Query<Entity, With<NodeMarker>>,
+) {
+    // The exhibition and tutorial have their own end-of-game flows.
+    if duel.is_some() || tut.is_some() {
+        return;
+    }
+    let Some(result) = session.0.result() else {
+        return;
+    };
+    let is_local = matches!(session.0.connection, Connection::Local);
+    let ruleset = session.0.game.config().ruleset_id.clone();
+    let ctx = egui_ctx.ctx_mut();
+    egui::Window::new("对局结束")
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, [0.0, -40.0])
+        .show(ctx, |ui| {
+            let headline = match result {
+                GameResult::Win { player, reason } => {
+                    let how = match reason {
+                        WinReason::RealmWeave => {
+                            if ruleset == realmweave_core::TRINITY_Y_V4 {
+                                "取得两界"
+                            } else {
+                                "编织成网"
+                            }
+                        }
+                        WinReason::Strangle => "绞杀",
+                        WinReason::Territory => "领地",
+                        WinReason::Resignation => "对方认输",
+                        WinReason::Timeout => "对方超时",
+                    };
+                    format!("{} 获胜 — {}", player.name(), how)
+                }
+                GameResult::Draw => "平局".to_string(),
+            };
+            ui.heading(headline);
+            ui.add_space(4.0);
+            if ruleset == realmweave_core::TRINITY_Y_V4 {
+                for (i, name) in ["天界", "人间", "冥界"].iter().enumerate() {
+                    let winner = realmweave_core::rules::TrinityY::realm_winner(
+                        session.0.game.board(),
+                        session.0.game.state(),
+                        i,
+                    );
+                    ui.label(format!(
+                        "{name}: {}",
+                        winner.map(|p| p.name()).unwrap_or("未分")
+                    ));
+                }
+            }
+            let caps = session.0.game.state().captures;
+            if caps != [0, 0] {
+                ui.label(format!("提子 白{}:黑{}", caps[0], caps[1]));
+            }
+            ui.label(format!("共 {} 手", session.0.game.state().move_log.len()));
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                if is_local && ui.button("💾 保存棋谱").clicked() {
+                    let record = session.0.game.record();
+                    let path = format!(
+                        "game-{}-{}moves.json",
+                        session.0.game.board().definition().id,
+                        record.moves.len()
+                    );
+                    match serde_json::to_string_pretty(&record)
+                        .map_err(|e| e.to_string())
+                        .and_then(|json| std::fs::write(&path, json).map_err(|e| e.to_string()))
+                    {
+                        Ok(()) => ui_state.status = format!("已保存 {path}"),
+                        Err(e) => ui_state.status = format!("保存失败: {e}"),
+                    }
+                }
+                if is_local && ui.button("🔄 再来一局").clicked() {
+                    let control = session.0.control;
+                    let rules_id = session.0.game.config().ruleset_id.clone();
+                    let pie = session.0.game.config().pie_rule;
+                    let def = session.0.game.board().definition().clone();
+                    let board = BoardGraph::new(def).expect("board round-trips");
+                    let mut next = Session::hotseat_with_rules(board, pie, &rules_id);
+                    next.control = control;
+                    session.0 = next;
+                }
+                if ui.button("返回菜单").clicked() {
+                    commands.remove_resource::<Active>();
+                    commands.remove_resource::<GameSession>();
+                    commands.remove_resource::<Net>();
+                    commands.remove_resource::<BoardSpawned>();
+                    commands.remove_resource::<Palette>();
+                    commands.remove_resource::<Replay>();
+                    for entity in &nodes {
+                        commands.entity(entity).despawn();
+                    }
+                    ui_state.status.clear();
+                }
+            });
+            if !ui_state.status.is_empty() {
+                ui.small(&ui_state.status);
+            }
         });
 }

@@ -13,6 +13,8 @@ pub enum PlayerIntent {
     Pass,
     Swap,
     Resign,
+    /// Local-only: take back the last move (vs-AI: the last exchange).
+    Undo,
 }
 
 /// Which color(s) this instance controls.
@@ -175,6 +177,27 @@ impl Session {
     /// Apply an intent locally (hot-seat) — online mode sends to the server
     /// instead and applies on MoveAccepted.
     pub fn apply_local(&mut self, intent: &PlayerIntent) {
+        if let PlayerIntent::Undo = intent {
+            // vs-AI: rewind to the human's previous decision point (undo
+            // the AI's reply too). Hot-seat: one move.
+            let times = match self.control {
+                Control::VsBot(human) => {
+                    if self.game.to_move() == human {
+                        2
+                    } else {
+                        1
+                    }
+                }
+                _ => 1,
+            };
+            for _ in 0..times {
+                if let Err(e) = self.game.undo() {
+                    self.last_error = Some(e.to_string());
+                    break;
+                }
+            }
+            return;
+        }
         let mv = match intent {
             PlayerIntent::PlaceStone(n) => Move::Place(*n),
             PlayerIntent::SeverStone(n) => Move::Sever(*n),
@@ -182,6 +205,7 @@ impl Session {
             PlayerIntent::Pass => Move::Pass,
             PlayerIntent::Swap => Move::Swap,
             PlayerIntent::Resign => Move::Resign,
+            PlayerIntent::Undo => unreachable!("handled above"),
         };
         match self.game.play(mv) {
             Ok(_) => self.last_error = None,

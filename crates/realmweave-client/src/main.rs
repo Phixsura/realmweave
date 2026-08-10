@@ -83,6 +83,7 @@ fn main() {
                     sync_board_visuals,
                     orbit_camera,
                     game_hud,
+                    game_over_panel,
                     tutorial_panel.run_if(resource_exists::<Tutorial>),
                     duel_panel.run_if(resource_exists::<Duel>),
                 )

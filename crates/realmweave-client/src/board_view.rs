@@ -420,6 +420,17 @@ pub(crate) fn sync_board_visuals(
         }
     }
 
+    // Last-move pulse: a breathing ring around the freshest stone.
+    if let Some(last) = session.0.last_placed() {
+        let p = Vec3::from_array(layout::node_position(board, last, view.mode));
+        let r = 0.55 + 0.12 * (time.elapsed_secs() * 4.0).sin();
+        gizmos.sphere(
+            Isometry3d::from_translation(p),
+            r,
+            Color::srgba(1.0, 1.0, 1.0, 0.55),
+        );
+    }
+
     // Cut-mode anchor highlight.
     if let Some(anchor) = view.cut_anchor {
         let p = Vec3::from_array(layout::node_position(board, anchor, view.mode));
@@ -514,6 +525,9 @@ pub(crate) fn handle_intents(
             }
             (Some(handle), PlayerIntent::Resign) => {
                 handle.send(ClientMessage::Resign);
+            }
+            (Some(_), PlayerIntent::Undo) => {
+                // Undo is local-only; the server is authoritative online.
             }
         }
     }
