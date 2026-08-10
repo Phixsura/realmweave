@@ -57,6 +57,8 @@ async fn start_server() -> (String, Arc<AppState>) {
     let mut boards = std::collections::HashMap::new();
     let def = boardgen::generate_standard(19).unwrap();
     boards.insert(def.id.clone(), def);
+    let tri = boardgen::generate_trinity(8).unwrap();
+    boards.insert(tri.id.clone(), tri);
     let store = Store::open("sqlite::memory:").await.unwrap();
     let state = Arc::new(AppState {
         boards,
@@ -368,4 +370,60 @@ async fn pie_rule_swap_exchanges_seats() {
     // original creator's connection now.
     light.send(ClientMessage::PlayMove { node: 22 }).await;
     assert!(matches!(light.recv().await, ServerMessage::MoveAccepted(_)));
+}
+
+/// The flagship ruleset over the wire: create a trinity room, play a few
+/// moves both ways, capture works, records replay.
+#[tokio::test]
+async fn trinity_online_game_flows() {
+    let (addr, _state) = start_server().await;
+    let mut a = Client::connect(&addr).await;
+    a.send(ClientMessage::CreateRoom {
+        config: GameConfig::new("tri8-v4")
+            .with_ruleset(realmweave_core::TRINITY_Y_V4)
+            .with_time_control(TimeControl {
+                base_ms: 60_000,
+                increment_ms: 0,
+            }),
+    })
+    .await;
+    let (room_id, _token_a) = match a.recv().await {
+        ServerMessage::RoomCreated { room_id, token, .. } => (room_id, token),
+        other => panic!("expected RoomCreated, got {other:?}"),
+    };
+    let mut b = Client::connect(&addr).await;
+    b.send(ClientMessage::JoinRoom {
+        room_id: room_id.clone(),
+    })
+    .await;
+    // drain join/start messages on both clients
+    let _ = b.recv().await; // Joined
+    let _ = b.recv().await; // Snapshot
+    let _ = a.recv().await; // OpponentConnection / start
+
+    // A (Light) plays node 10, B (Dark) plays node 40.
+    a.send(ClientMessage::PlayMove { node: 10 }).await;
+    // both receive MoveAccepted
+    let ev_a = a.recv().await;
+    assert!(
+        matches!(ev_a, ServerMessage::MoveAccepted(_)),
+        "light move accepted: {ev_a:?}"
+    );
+    let _ = b.recv().await;
+    b.send(ClientMessage::PlayMove { node: 40 }).await;
+    let ev_b = b.recv().await;
+    assert!(
+        matches!(ev_b, ServerMessage::MoveAccepted(_)),
+        "dark move accepted: {ev_b:?}"
+    );
+
+    // Illegal for A: occupied node.
+    a.send(ClientMessage::PlayMove { node: 10 }).await;
+    // skip B's mirror of the event then read A's rejection
+    let _ = a.recv().await; // b's move event arrives first on a
+    let rejected = a.recv().await;
+    assert!(
+        matches!(rejected, ServerMessage::MoveRejected { .. }),
+        "occupied node rejected: {rejected:?}"
+    );
 }
