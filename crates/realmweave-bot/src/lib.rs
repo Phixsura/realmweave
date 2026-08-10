@@ -551,7 +551,27 @@ pub fn choose_move_with_budget(game: &Game, seed: u64, budget: mcts::MctsConfig)
     if game.board().definition().origins.is_empty()
         && game.config().ruleset_id == rules::TRINITY_Y_V4
     {
-        return mcts::choose_move_mcts(game, seed, budget).or(Some(Move::Pass));
+        // The simulator plays simple-ko; the engine enforces positional
+        // superko. A rules divergence here must never leak to callers: an
+        // unplayable "best move" would livelock deterministic retry loops.
+        if let Some(mv) = mcts::choose_move_mcts(game, seed, budget) {
+            if game.validate(&mv).is_ok() {
+                return Some(mv);
+            }
+            // Rare: superko-illegal choice. Take the best legal placement
+            // by a quick re-search with a different seed, else any legal.
+            if let Some(mv2) = mcts::choose_move_mcts(game, seed.wrapping_add(0x9E3779B9), budget) {
+                if mv2 != mv && game.validate(&mv2).is_ok() {
+                    return Some(mv2);
+                }
+            }
+            return game
+                .legal_moves()
+                .into_iter()
+                .find(|m| matches!(m, Move::Place(_)))
+                .or(Some(Move::Pass));
+        }
+        return Some(Move::Pass);
     }
     let me = game.to_move();
     let cands: Vec<Move> = candidates(game, me)
@@ -650,4 +670,36 @@ pub fn supports(ruleset_id: &str) -> bool {
             | rules::THREE_REALMS_V1
             | rules::SEVER_V1
     )
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+    use super::*;
+    use realmweave_core::{boardgen, GameConfig};
+
+    /// The chosen move must always be playable on the real engine — the
+    /// simulator's simple-ko vs the engine's superko must never leak.
+    #[test]
+    fn chosen_moves_always_playable() {
+        let def = boardgen::generate_trinity(6).unwrap();
+        let board = BoardGraph::new(def).unwrap();
+        let cfg = GameConfig::new(board.definition().id.clone()).with_ruleset(rules::TRINITY_Y_V4);
+        let mut game = Game::new(board, cfg).unwrap();
+        let budget = mcts::MctsConfig {
+            playouts: 60,
+            c: 0.9,
+        };
+        for ply in 0..80 {
+            if game.result().is_some() {
+                break;
+            }
+            let mv = choose_move_with_budget(&game, 0x5EED ^ ply, budget)
+                .expect("bot always proposes something");
+            assert!(
+                game.play(mv).is_ok(),
+                "ply {ply}: bot proposed unplayable {mv:?}"
+            );
+        }
+    }
 }

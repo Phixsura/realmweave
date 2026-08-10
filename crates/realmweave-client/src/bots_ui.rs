@@ -56,9 +56,11 @@ pub(crate) fn bot_turn(
             match rx.try_recv() {
                 Ok(mv) => {
                     task.0 = None;
-                    if let Some(mv) = mv {
-                        let _ = s.game.play(mv);
-                    } else {
+                    // If the engine rejects the move (should be prevented in
+                    // the bot lib), pass rather than silently retrying the
+                    // same deterministic choice forever.
+                    let played = mv.map(|m| s.game.play(m).is_ok()).unwrap_or(false);
+                    if !played {
                         let _ = s.game.play(realmweave_core::Move::Pass);
                     }
                 }
