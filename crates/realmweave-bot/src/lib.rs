@@ -703,3 +703,43 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod superko_tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+    use realmweave_core::rules::position_hash;
+    use realmweave_core::{boardgen, BoardGraph, Game, GameConfig, Move};
+
+    /// The engine's recorded position hashes and the MCTS root filter must
+    /// agree byte-for-byte, including the to_move timing subtlety (the
+    /// engine hashes BEFORE flipping to_move). If this drifts, the superko
+    /// filter silently stops filtering.
+    #[test]
+    fn engine_hash_timing_contract() {
+        let def = boardgen::generate_trinity(6).unwrap();
+        let board = BoardGraph::new(def).unwrap();
+        let cfg = GameConfig::new(board.definition().id.clone())
+            .with_ruleset(realmweave_core::rules::TRINITY_Y_V4);
+        let mut game = Game::new(board, cfg).unwrap();
+        let mv = game
+            .legal_moves()
+            .into_iter()
+            .find(|m| matches!(m, Move::Place(_)))
+            .unwrap();
+        let mover = game.to_move();
+        game.play(mv).unwrap();
+        let engine_hash = *game.state().position_hashes.last().unwrap();
+        // Recompute the same hash the way the MCTS filter does: current
+        // occupancy + the MOVER (not the new to_move).
+        let mut shell = realmweave_core::GameState::new(
+            game.board().definition().id.clone(),
+            game.board().node_count(),
+        );
+        shell.occupancy = game.state().occupancy.clone();
+        shell.to_move = mover;
+        assert_eq!(position_hash(&shell), engine_hash);
+        // And the flipped to_move must NOT match — proving the timing matters.
+        shell.to_move = mover.opponent();
+        assert_ne!(position_hash(&shell), engine_hash);
+    }
+}

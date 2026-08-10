@@ -5,7 +5,8 @@
 //! playout policy is uniform-random over non-eye empties — deliberately
 //! dumb and fast; strength comes from the tree, not the policy.
 
-use realmweave_core::{boardgen, BoardGraph, Game, Move, NodeId, Player};
+use realmweave_core::rules::position_hash;
+use realmweave_core::{boardgen, BoardGraph, Game, GameState, Move, NodeId, Player};
 
 /// Search budget: number of playouts from the root.
 #[derive(Clone, Copy, Debug)]
@@ -37,7 +38,26 @@ struct Sim<'a> {
     to_move: Player,
     winner: Option<Player>,
     /// Simple ko: the single point just captured (illegal immediate refill).
+    /// Used inside playouts, where full superko would be too slow and a
+    /// stochastic estimate tolerates the noise.
     ko_point: Option<NodeId>,
+}
+
+/// The engine's exact position hash for a Sim state — occupancy + to_move
+/// through `rules::position_hash`, so hashes are comparable with the live
+/// game's `position_hashes` history. Tree-level moves are checked against
+/// that set: what the tree recommends, the engine will accept.
+///
+/// TIMING: the engine pushes its hash BEFORE flipping `to_move` (the hash
+/// carries the MOVER), while `Sim::place` flips at the end — so callers
+/// pass the mover explicitly rather than trusting `sim.to_move`.
+fn sim_hash(sim: &Sim, board_id: &str, mover: Player) -> u64 {
+    // Reuse the engine's function via a minimal GameState shell so the two
+    // implementations can never drift apart.
+    let mut st = GameState::new(board_id.to_string(), sim.occ.len());
+    st.occupancy = sim.occ.clone();
+    st.to_move = mover;
+    position_hash(&st)
 }
 
 impl<'a> Sim<'a> {
@@ -331,7 +351,24 @@ struct NodeStats {
 pub fn choose_move_mcts(game: &Game, seed: u64, config: MctsConfig) -> Option<Move> {
     let root = Sim::from_game(game);
     let me = root.to_move;
-    let cands = root.legal_candidates();
+    let board_id = game.board().definition().id.clone();
+    // Positional superko, exactly as the engine sees it: the game's full
+    // hash history. Any root move recreating one of these is excluded from
+    // the tree, so the recommendation is engine-legal by construction.
+    let history: std::collections::HashSet<u64> =
+        game.state().position_hashes.iter().copied().collect();
+    let mut scratch0 = Scratch {
+        buf: Vec::with_capacity(64),
+        seen: vec![false; game.board().node_count()],
+    };
+    let cands: Vec<NodeId> = root
+        .legal_candidates()
+        .into_iter()
+        .filter(|&mv| {
+            let mut sim = root.clone();
+            sim.place(mv, &mut scratch0) && !history.contains(&sim_hash(&sim, &board_id, me))
+        })
+        .collect();
     if cands.is_empty() {
         return None;
     }
