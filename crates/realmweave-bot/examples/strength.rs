@@ -16,10 +16,21 @@ fn main() {
     for g in 0..games {
         // alternate colors: MCTS plays Light on even games
         let mcts_is_light = g % 2 == 0;
-        let def = boardgen::generate_trinity(side).unwrap();
+        let ruleset = std::env::args()
+            .nth(3)
+            .unwrap_or_else(|| realmweave_core::TRIFORCE_V5.to_string());
+        let def = if ruleset == realmweave_core::TRIFORCE_V5 {
+            boardgen::generate_triforce(if side.is_multiple_of(2) {
+                side
+            } else {
+                side + 1
+            })
+            .unwrap()
+        } else {
+            boardgen::generate_trinity(side).unwrap()
+        };
         let board = BoardGraph::new(def).unwrap();
-        let cfg = GameConfig::new(board.definition().id.clone())
-            .with_ruleset(realmweave_core::TRINITY_Y_V4);
+        let cfg = GameConfig::new(board.definition().id.clone()).with_ruleset(&ruleset);
         let mut game = Game::new(board, cfg).unwrap();
         while game.result().is_none() && game.state().ply < 600 {
             let seed = 0xACEu64 ^ (g as u64) << 32 ^ game.state().ply as u64;

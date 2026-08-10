@@ -39,12 +39,12 @@ containing the binary, `boards/`, docs, and (steam builds) `steam_appid.txt`.
 
 ### Copy (draft)
 
-**One-liner**: 两条规则，三个世界，零和局。围棋级的深度基因，全新的三线战略。
+**One-liner**: 两条规则，三界一心，零和局。围棋级的深度基因，织心之争。
 
 **Short description (EN)**: Realmweave is an abstract strategy game built
-from exactly two rules: connect all three sides of a realm to weave it, and
-groups without liberties die. Three triangular realms share one turn clock —
-every stone is also a decision about which war to fight. No draws,
+from exactly two rules: weave one chain across all three sides of the great
+triangle, and groups without liberties die. Three realms meet at the glowing
+weave-heart — every winning path must cross their borders. No draws,
 mathematically guaranteed. Play locally, against the engine, or online.
 
 **Key selling points**

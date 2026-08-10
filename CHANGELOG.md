@@ -3,7 +3,12 @@
 ## Unreleased — 0.1.0 candidate
 
 ### Game
-- **Trinity Y v4.1** (flagship): three triangular realms; two rules — the Y
+- **Triforce v5 织心** (flagship): one great triangle whose corners are
+  the three realms and whose center is the weave-heart; two rules —
+  weave (touch all three sides with one group; Y theorem: no draws) and
+  death (liberties/capture/ko). Winning paths provably cross realms and
+  contest the heart.
+- **Trinity Y v4.1** (kept): three triangular realms; two rules — the Y
   goal (connect all three sides of a realm; first to two realms) and death
   (liberties/capture/ko). Won realms seal. Theory: the Y theorem gives
   attack-defense unity and guarantees decisiveness (0% dead random fills vs

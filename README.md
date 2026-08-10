@@ -7,24 +7,26 @@ Rust-first engine for graph-native competitive strategy games.
 > The world is a graph; strategy emerges from how players weave and sever
 > paths through it.
 
-Two players (Light and Dark) fight across three realms — **Heaven**,
-**Mortal**, and **Underworld**. The flagship ruleset is **Trinity Y v4.1**,
-built from exactly two rules:
+Two players (Light and Dark) fight across one great triangular battlefield
+whose three corners are the realms — **Heaven**, **Mortal**, **Underworld**
+— and whose glowing center is the **weave-heart** where all three meet.
+The flagship ruleset is **Triforce v5 (织心)**, built from exactly two rules:
 
-1. **Y goal** — a realm is woven by whoever connects all three of its sides
-   with one group. The Y theorem guarantees every realm is decisive and
-   blocking IS building (attack-defense unity). First to two realms wins.
+1. **Weave** — connect all three sides of the great triangle with one
+   group. The Y theorem guarantees exactly one player can ever do this:
+   no draws, and blocking IS building (attack-defense unity).
 2. **Death** — a group with no adjacent empty node is captured; suicide and
    position repetition (ko) are illegal. Stones die; walls need eyes; whole
    groups can be hunted.
 
-Three realms share one turn clock, so every stone is also a tempo decision
-about *which war to fight*. Eyes, ladders, ko fights, sacrifices, and
-comebacks must all emerge from the two rules — adding a third is forbidden
-by design discipline (docs/design-trinity-y-v4.md).
+Every side of the great triangle spans two realms, so every winning path
+crosses realms and contests the heart (measured: 100% of wins). Eyes,
+ladders, ko fights, sacrifices, and comebacks must all emerge from the two
+rules — adding a third is forbidden by design discipline
+(docs/design-triforce-v5.md).
 
-Earlier rulesets (classic weave race, weave&sever, 层层编织 layers) remain
-playable and versioned; see [docs/rules.md](docs/rules.md).
+Earlier rulesets (classic weave race, weave&sever, 层层编织 layers, 三界Y)
+remain playable and versioned; see [docs/rules.md](docs/rules.md).
 
 ## Workspace
 
