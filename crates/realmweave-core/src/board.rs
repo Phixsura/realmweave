@@ -137,6 +137,21 @@ pub struct Origin {
     pub node: NodeId,
 }
 
+/// Structural family of a board — determines goal geometry, symmetry
+/// checks, and rendering layout. Derived from the id in ONE place so the
+/// `starts_with("tf")` string checks scattered through three crates have a
+/// single authority.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BoardFamily {
+    /// Three stacked hexagonal realms joined at gate columns (origins).
+    StackedHex,
+    /// Three separate triangles, side goals (trinity-y-v4).
+    SplitTriangles,
+    /// One merged triangle: realms + weave-heart as interior regions
+    /// (triforce-v5).
+    MergedTriangle,
+}
+
 /// A complete board as data: the unit of persistence and validation.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BoardDefinition {
@@ -165,6 +180,19 @@ impl BoardDefinition {
             .filter(|o| o.player == player)
             .map(|o| o.node)
             .collect()
+    }
+
+    /// Structural family, derived from the id convention
+    /// (`hex…`/`tri…`/`tf…`). Unknown prefixes default to StackedHex, the
+    /// family of every hand-made board to date.
+    pub fn family(&self) -> BoardFamily {
+        if self.id.starts_with("tf") {
+            BoardFamily::MergedTriangle
+        } else if self.id.starts_with("tri") {
+            BoardFamily::SplitTriangles
+        } else {
+            BoardFamily::StackedHex
+        }
     }
 
     /// Content fingerprint: hash of nodes/edges/origins (not id/version).

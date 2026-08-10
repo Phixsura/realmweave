@@ -340,4 +340,8 @@ impl RuleSet for TrinityY {
     fn evaluate(&self, _board: &BoardGraph, state: &GameState) -> Option<GameResult> {
         state.result
     }
+
+    fn allows_pass(&self) -> bool {
+        true
+    }
 }

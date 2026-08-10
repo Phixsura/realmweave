@@ -8,11 +8,10 @@ use realmweave_core::{Game, Player, Realm};
 pub fn render(game: &Game) -> String {
     let board = game.board();
     let def = board.definition();
-    if def.id.starts_with("tf") {
-        return render_triforce(game);
-    }
-    if def.id.starts_with("tri") {
-        return render_trinity(game);
+    match def.family() {
+        realmweave_core::BoardFamily::MergedTriangle => return render_triforce(game),
+        realmweave_core::BoardFamily::SplitTriangles => return render_trinity(game),
+        realmweave_core::BoardFamily::StackedHex => {}
     }
     let state = game.state();
     let gates: std::collections::HashSet<_> = def.gate_nodes().into_iter().collect();

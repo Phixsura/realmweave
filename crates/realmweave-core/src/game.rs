@@ -121,6 +121,11 @@ impl Game {
         &self.config
     }
 
+    /// The active ruleset (capability queries and versioned id).
+    pub fn rules(&self) -> &dyn RuleSet {
+        self.ruleset.as_ref()
+    }
+
     /// Current state snapshot.
     pub fn state(&self) -> &GameState {
         &self.state

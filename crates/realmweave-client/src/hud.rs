@@ -78,10 +78,7 @@ pub(crate) fn game_hud(
             }
             ui.checkbox(&mut view.show_legal, "legal moves");
             ui.checkbox(&mut view.show_components, "weave highlight");
-            if matches!(
-                s.game.config().ruleset_id.as_str(),
-                realmweave_core::WEAVE_SEVER_V2 | realmweave_core::WEAVE_LAYERS_V3
-            ) {
+            if s.game.rules().uses_scissors() {
                 let label = if view.cut_mode {
                     "✂ 剪线模式 (点两个端点)"
                 } else {
@@ -102,17 +99,12 @@ pub(crate) fn game_hud(
                 if s.swap_available() && ui.button("swap sides (pie)").clicked() {
                     events.send(IntentEvent(PlayerIntent::Swap));
                 }
-                // Pass availability by ruleset, NOT by enumerating every
-                // legal move each frame (that scan validates all ~250
-                // placements including capture simulation).
-                let pass_allowed = matches!(
-                    s.game.config().ruleset_id.as_str(),
-                    realmweave_core::TRIFORCE_V5
-                        | realmweave_core::TRINITY_Y_V4
-                        | realmweave_core::WEAVE_SEVER_V2
-                        | realmweave_core::WEAVE_LAYERS_V3
-                );
-                if s.result().is_none() && pass_allowed && ui.button("pass").clicked() {
+                // Pass availability is a ruleset capability, NOT an
+                // enumeration of every legal move each frame.
+                if s.result().is_none()
+                    && s.game.rules().allows_pass()
+                    && ui.button("pass").clicked()
+                {
                     events.send(IntentEvent(PlayerIntent::Pass));
                 }
                 if s.result().is_none() && ui.button("resign").clicked() {
@@ -197,11 +189,7 @@ pub(crate) fn game_hud(
                     .size(16.0),
                 );
             }
-            let is_scissor_rules = matches!(
-                s.game.config().ruleset_id.as_str(),
-                realmweave_core::WEAVE_SEVER_V2 | realmweave_core::WEAVE_LAYERS_V3
-            );
-            if is_scissor_rules {
+            if s.game.rules().uses_scissors() {
                 let sc = s.game.state().scissors;
                 ui.label(egui::RichText::new(format!("✂ 白 {} | 黑 {}", sc[0], sc[1])).strong());
                 // Lifelines: potential origin groups (1 = healthy).

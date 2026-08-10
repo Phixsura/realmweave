@@ -177,10 +177,7 @@ pub(crate) fn toggle_cut_mode(
     session: Option<Res<GameSession>>,
 ) {
     let Some(session) = session else { return };
-    if !matches!(
-        session.0.game.config().ruleset_id.as_str(),
-        realmweave_core::WEAVE_SEVER_V2 | realmweave_core::WEAVE_LAYERS_V3
-    ) {
+    if !session.0.game.rules().uses_scissors() {
         return;
     }
     if keys.just_pressed(KeyCode::Tab) {
@@ -581,7 +578,7 @@ pub(crate) fn sync_board_visuals(
     // Realm layer rings for readability (3D view) — stacked hex boards
     // only: flat boards (triforce, trinity triangles) have no layers and
     // the rings would float in empty space.
-    let stacked_board = def.id.starts_with("hex");
+    let stacked_board = def.family() == realmweave_core::BoardFamily::StackedHex;
     if view.mode == ViewMode::Stacked3D && stacked_board {
         let max_r = def
             .nodes

@@ -43,7 +43,7 @@ pub fn node_position(board: &BoardGraph, node: NodeId, mode: ViewMode) -> [f32; 
             // Merged-field boards (triforce) are ONE flat triangle whose
             // realm tags are interior regions — shifting per tag would tear
             // the board into three pieces. They render as-is.
-            if board.definition().id.starts_with("tf") {
+            if board.definition().family() == realmweave_core::BoardFamily::MergedTriangle {
                 return [x, 0.0, z];
             }
             let dx = analysis_offset(board);

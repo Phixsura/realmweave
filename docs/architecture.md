@@ -31,6 +31,30 @@ The client is one module per concern (`client/src/`): `menu`, `board_view`,
 `hud`, `bots_ui` (vs-AI + exhibition), `netsync`, `replay_ui`; `main.rs`
 holds app assembly, shared resources, and the system schedule.
 
+## Dispatch discipline
+
+Two axes of variation, each with ONE authority:
+
+- **Board family** (`BoardDefinition::family()` → StackedHex /
+  SplitTriangles / MergedTriangle): goal geometry, symmetry validation,
+  and layout dispatch on this enum — never on id-prefix strings.
+- **Ruleset capabilities** (`RuleSet::uses_scissors/allows_pass`, reached
+  via `Game::rules()`): the client asks the trait what UI to show. Ruleset
+  ID comparisons remain legitimate only for genuinely per-ruleset
+  presentation (e.g. the flagship's region tinting).
+
+## Accepted debts (reviewed, deliberate)
+
+- Client modules use `use crate::*` glob imports — a refactor-speed trade
+  from the main.rs split; boundaries are enforced by review, not the
+  compiler. Revisit if the client grows another 2×.
+- Session teardown removes ~6 resources manually in three places (leave /
+  game-over / tutorial-exit). A Bevy `AppState` + `OnExit` migration would
+  centralize it; deferred until a fourth cleanup site appears.
+- Positional-superko history is a `Vec::contains` linear scan
+  (O(moves) per validate); measured ~µs at 250 moves. A HashSet in
+  GameState would break serde/replay compatibility for zero felt gain.
+
 Hard rules:
 
 - `realmweave-core` never depends on UI, networking, databases, or async

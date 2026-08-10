@@ -111,7 +111,7 @@ pub fn validate_board(definition: &BoardDefinition) -> Result<BoardGraph, Valida
     }
 
     // --- connectivity ---
-    let merged_field = def.id.starts_with("tf");
+    let merged_field = def.family() == crate::board::BoardFamily::MergedTriangle;
     if merged_field {
         // One connected battlefield.
         let dist = graph.bfs_distances(0);
@@ -220,7 +220,7 @@ fn check_hex_symmetry(graph: &BoardGraph) -> Result<(), ValidationError> {
     // left-right mirror (col -> row - col), which any fair triangle must
     // admit; the 120° rotations need barycentric coords and are guaranteed
     // by construction in the generator.
-    if def.id.starts_with("tf") {
+    if def.family() == crate::board::BoardFamily::MergedTriangle {
         // Triforce: one triangle; realm tags mark interior regions, not
         // separate components. Mirror symmetry (c → r−c) must hold.
         let index = graph.axial_index();
@@ -245,7 +245,7 @@ fn check_hex_symmetry(graph: &BoardGraph) -> Result<(), ValidationError> {
         }
         return Ok(());
     }
-    if def.id.starts_with("tri") {
+    if def.family() == crate::board::BoardFamily::SplitTriangles {
         let index = graph.axial_index();
         let mut map = vec![0; graph.node_count()];
         for node in &def.nodes {

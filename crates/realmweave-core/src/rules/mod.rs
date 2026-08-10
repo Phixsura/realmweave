@@ -112,6 +112,18 @@ pub trait RuleSet: Send + Sync {
     ) -> Result<GameState, RuleError>;
     /// Terminal result, if the game has ended.
     fn evaluate(&self, board: &BoardGraph, state: &GameState) -> Option<GameResult>;
+
+    // --- capability queries (UI dispatch without ruleset-id string
+    // matching scattered through the client) ---
+
+    /// Does this ruleset use scissors/edge-cutting?
+    fn uses_scissors(&self) -> bool {
+        false
+    }
+    /// Is Pass a legal move class in this ruleset?
+    fn allows_pass(&self) -> bool {
+        false
+    }
 }
 
 /// Look up a ruleset implementation by its persisted id.

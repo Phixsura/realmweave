@@ -42,7 +42,8 @@ pub mod state;
 pub mod validate;
 
 pub use board::{
-    BoardDefinition, BoardError, BoardGraph, Edge, EdgeKind, Node, NodeId, Origin, Player, Realm,
+    BoardDefinition, BoardError, BoardFamily, BoardGraph, Edge, EdgeKind, Node, NodeId, Origin,
+    Player, Realm,
 };
 pub use game::{Game, GameError, GameRecord};
 pub use rules::{

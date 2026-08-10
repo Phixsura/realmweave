@@ -498,4 +498,12 @@ impl RuleSet for WeaveSeverV2 {
     fn evaluate(&self, _board: &BoardGraph, state: &GameState) -> Option<GameResult> {
         state.result
     }
+
+    fn uses_scissors(&self) -> bool {
+        true
+    }
+
+    fn allows_pass(&self) -> bool {
+        true
+    }
 }
