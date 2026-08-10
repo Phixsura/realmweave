@@ -1,0 +1,64 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            archive: tar.gz
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            archive: tar.gz
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            archive: zip
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+      - name: Install system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }} -p realmweave-client -p realmweave-server -p realmweave-cli
+      - name: Package (unix)
+        if: matrix.archive == 'tar.gz'
+        run: |
+          mkdir -p dist/realmweave
+          cp target/${{ matrix.target }}/release/realmweave-client dist/realmweave/
+          cp target/${{ matrix.target }}/release/realmweave-server dist/realmweave/
+          cp target/${{ matrix.target }}/release/realmweave-cli dist/realmweave/
+          cp -r boards docs/rules.md README.md LICENSE dist/realmweave/
+          tar czf realmweave-${{ github.ref_name }}-${{ matrix.target }}.tar.gz -C dist realmweave
+      - name: Package (windows)
+        if: matrix.archive == 'zip'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist/realmweave
+          Copy-Item target/${{ matrix.target }}/release/realmweave-client.exe dist/realmweave/
+          Copy-Item target/${{ matrix.target }}/release/realmweave-server.exe dist/realmweave/
+          Copy-Item target/${{ matrix.target }}/release/realmweave-cli.exe dist/realmweave/
+          Copy-Item -Recurse boards dist/realmweave/boards
+          Copy-Item docs/rules.md,README.md,LICENSE dist/realmweave/
+          Compress-Archive -Path dist/realmweave -DestinationPath realmweave-${{ github.ref_name }}-${{ matrix.target }}.zip
+      - name: Upload to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            realmweave-*.tar.gz
+            realmweave-*.zip

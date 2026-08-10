@@ -6,6 +6,8 @@
 //! never plays illegal or pointless moves. Deterministic given (state,
 //! seed) so games remain replayable.
 
+pub mod mcts;
+
 use realmweave_core::board::BoardGraph;
 use realmweave_core::rules;
 use realmweave_core::state::{GameResult, Move};
@@ -539,6 +541,18 @@ fn shape_score(game: &Game, me: Player, node: NodeId) -> f64 {
 /// Choose the bot's move: 2-ply search (my move → opponent's best reply by
 /// static eval) over filtered candidates.
 pub fn choose_move(game: &Game, seed: u64) -> Option<Move> {
+    choose_move_with_budget(game, seed, mcts::MctsConfig::default())
+}
+
+/// Like [`choose_move`] with an explicit MCTS budget (trinity only; other
+/// rulesets use the fixed 2-ply search).
+pub fn choose_move_with_budget(game: &Game, seed: u64, budget: mcts::MctsConfig) -> Option<Move> {
+    // Trinity boards get the real engine: UCT over a fast simulator.
+    if game.board().definition().origins.is_empty()
+        && game.config().ruleset_id == rules::TRINITY_Y_V4
+    {
+        return mcts::choose_move_mcts(game, seed, budget).or(Some(Move::Pass));
+    }
     let me = game.to_move();
     let cands: Vec<Move> = candidates(game, me)
         .into_iter()

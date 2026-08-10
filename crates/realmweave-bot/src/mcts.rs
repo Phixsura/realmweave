@@ -1,0 +1,392 @@
+//! Monte-Carlo tree search for Trinity Y.
+//!
+//! A dedicated fast simulator (raw occupancy vectors, incremental liberty
+//! checks, no superko bookkeeping inside playouts) drives a UCT tree. The
+//! playout policy is uniform-random over non-eye empties — deliberately
+//! dumb and fast; strength comes from the tree, not the policy.
+
+use realmweave_core::{boardgen, BoardGraph, Game, Move, NodeId, Player};
+
+/// Search budget: number of playouts from the root.
+#[derive(Clone, Copy, Debug)]
+pub struct MctsConfig {
+    /// Playouts per move decision.
+    pub playouts: u32,
+    /// UCT exploration constant.
+    pub c: f64,
+}
+
+impl Default for MctsConfig {
+    fn default() -> Self {
+        MctsConfig {
+            playouts: 3000,
+            c: 0.9,
+        }
+    }
+}
+
+/// Fast trinity position: enough state for legal playouts, nothing more.
+#[derive(Clone)]
+struct Sim<'a> {
+    board: &'a BoardGraph,
+    side: usize,
+    per_realm: usize,
+    occ: Vec<Option<Player>>,
+    /// Realm winner, if decided ([realm] -> Option<Player>).
+    realm_won: [Option<Player>; 3],
+    to_move: Player,
+    winner: Option<Player>,
+    /// Simple ko: the single point just captured (illegal immediate refill).
+    ko_point: Option<NodeId>,
+}
+
+impl<'a> Sim<'a> {
+    fn from_game(game: &'a Game) -> Self {
+        let board = game.board();
+        let per_realm = board.node_count() / 3;
+        let side = (((8 * per_realm + 1) as f64).sqrt() as usize - 1) / 2;
+        let st = game.state();
+        let mut sim = Sim {
+            board,
+            side,
+            per_realm,
+            occ: st.occupancy.clone(),
+            realm_won: [None; 3],
+            to_move: st.to_move,
+            winner: None,
+            ko_point: None,
+        };
+        for realm in 0..3 {
+            sim.realm_won[realm] = sim.realm_winner(realm);
+        }
+        sim.update_match_winner();
+        sim
+    }
+
+    fn realm_of(&self, node: NodeId) -> usize {
+        node as usize / self.per_realm
+    }
+
+    /// One group's members + liberty flag (early-exits on second liberty).
+    fn group_alive(&self, start: NodeId, buf: &mut Vec<NodeId>, seen: &mut [bool]) -> bool {
+        let Some(player) = self.occ[start as usize] else {
+            return true;
+        };
+        buf.clear();
+        buf.push(start);
+        seen[start as usize] = true;
+        let mut i = 0;
+        let mut alive = false;
+        while i < buf.len() {
+            let cur = buf[i];
+            i += 1;
+            for &nb in self.board.neighbors(cur) {
+                match self.occ[nb as usize] {
+                    None => alive = true,
+                    Some(p) if p == player && !seen[nb as usize] => {
+                        seen[nb as usize] = true;
+                        buf.push(nb);
+                    }
+                    _ => {}
+                }
+            }
+        }
+        alive
+    }
+
+    /// Apply a placement; returns false if it was suicide/ko (not applied).
+    fn place(&mut self, node: NodeId, scratch: &mut Scratch) -> bool {
+        if self.occ[node as usize].is_some() || self.realm_won[self.realm_of(node)].is_some() {
+            return false;
+        }
+        if self.ko_point == Some(node) {
+            return false;
+        }
+        let me = self.to_move;
+        self.occ[node as usize] = Some(me);
+        // capture adjacent enemy groups with no liberties
+        let mut captured_total = 0usize;
+        let mut last_captured = None;
+        scratch.seen.iter_mut().for_each(|b| *b = false);
+        for k in 0..self.board.neighbors(node).len() {
+            let nb = self.board.neighbors(node)[k];
+            if self.occ[nb as usize] == Some(me.opponent())
+                && !scratch.seen[nb as usize]
+                && !self.group_alive(nb, &mut scratch.buf, &mut scratch.seen)
+            {
+                for &m in &scratch.buf {
+                    self.occ[m as usize] = None;
+                    captured_total += 1;
+                    last_captured = Some(m);
+                }
+            }
+        }
+        // suicide?
+        scratch.seen.iter_mut().for_each(|b| *b = false);
+        if !self.group_alive(node, &mut scratch.buf, &mut scratch.seen) {
+            self.occ[node as usize] = None;
+            // restore captures? none happened if we're suicidal (capturing
+            // would have given us a liberty), so nothing to undo.
+            return false;
+        }
+        // simple ko: exactly one stone captured and the capturer is a lone stone
+        self.ko_point = if captured_total == 1 {
+            let lone = self
+                .board
+                .neighbors(node)
+                .iter()
+                .all(|&nb| self.occ[nb as usize] != Some(me));
+            if lone {
+                last_captured
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        // realm win check (only the placed realm can newly complete)
+        let realm = self.realm_of(node);
+        if self.realm_won[realm].is_none() {
+            self.realm_won[realm] = self.realm_winner_from(realm, node, me);
+            if self.realm_won[realm].is_some() {
+                self.update_match_winner();
+            }
+        }
+        self.to_move = me.opponent();
+        true
+    }
+
+    fn update_match_winner(&mut self) {
+        for pl in [Player::Light, Player::Dark] {
+            if self.realm_won.iter().filter(|w| **w == Some(pl)).count() >= 2 {
+                self.winner = Some(pl);
+            }
+        }
+    }
+
+    /// Did `player`'s group through `node` just complete a Y in `realm`?
+    fn realm_winner_from(&self, realm: usize, node: NodeId, player: Player) -> Option<Player> {
+        let lo = (realm * self.per_realm) as NodeId;
+        let hi = lo + self.per_realm as NodeId;
+        let mut stack = vec![node];
+        let mut seen = vec![false; self.per_realm];
+        seen[(node - lo) as usize] = true;
+        let mut touch = boardgen::trinity_sides(self.side, node);
+        while let Some(cur) = stack.pop() {
+            for &nb in self.board.neighbors(cur) {
+                if nb < lo || nb >= hi {
+                    continue;
+                }
+                if !seen[(nb - lo) as usize] && self.occ[nb as usize] == Some(player) {
+                    seen[(nb - lo) as usize] = true;
+                    touch |= boardgen::trinity_sides(self.side, nb);
+                    stack.push(nb);
+                }
+            }
+        }
+        (touch == 7).then_some(player)
+    }
+
+    /// Full scan (used only at root construction).
+    fn realm_winner(&self, realm: usize) -> Option<Player> {
+        let lo = (realm * self.per_realm) as NodeId;
+        let hi = lo + self.per_realm as NodeId;
+        for pl in [Player::Light, Player::Dark] {
+            let mut seen = vec![false; self.per_realm];
+            for start in lo..hi {
+                if self.occ[start as usize] != Some(pl) || seen[(start - lo) as usize] {
+                    continue;
+                }
+                if self.realm_winner_from(realm, start, pl) == Some(pl) {
+                    return Some(pl);
+                }
+                // mark component visited
+                let mut stack = vec![start];
+                seen[(start - lo) as usize] = true;
+                while let Some(cur) = stack.pop() {
+                    for &nb in self.board.neighbors(cur) {
+                        if nb >= lo
+                            && nb < hi
+                            && !seen[(nb - lo) as usize]
+                            && self.occ[nb as usize] == Some(pl)
+                        {
+                            seen[(nb - lo) as usize] = true;
+                            stack.push(nb);
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// True eye for `player`: empty point whose neighbors are all own
+    /// stones. Filling it is never right in a playout.
+    fn is_own_eye(&self, node: NodeId, player: Player) -> bool {
+        self.board
+            .neighbors(node)
+            .iter()
+            .all(|&nb| self.occ[nb as usize] == Some(player))
+    }
+
+    /// Random playout to the end; returns the winner (draw broken by
+    /// realm count then coin-parity for termination guarantees).
+    fn playout(&mut self, rng: &mut u64, scratch: &mut Scratch, max_moves: u32) -> Player {
+        let n = self.board.node_count();
+        let mut passes = 0u32;
+        for _ in 0..max_moves {
+            if let Some(w) = self.winner {
+                return w;
+            }
+            // pick a random legal, non-eye empty
+            let mut tries = 0;
+            let mut placed = false;
+            while tries < 12 {
+                *rng ^= *rng << 13;
+                *rng ^= *rng >> 7;
+                *rng ^= *rng << 17;
+                let node = (*rng % n as u64) as NodeId;
+                if self.occ[node as usize].is_none()
+                    && self.realm_won[self.realm_of(node)].is_none()
+                    && !self.is_own_eye(node, self.to_move)
+                    && self.place(node, scratch)
+                {
+                    placed = true;
+                    passes = 0;
+                    break;
+                }
+                tries += 1;
+            }
+            if !placed {
+                // dense board: linear scan fallback
+                let start = (*rng % n as u64) as usize;
+                let mut found = false;
+                for off in 0..n {
+                    let node = ((start + off) % n) as NodeId;
+                    if self.occ[node as usize].is_none()
+                        && self.realm_won[self.realm_of(node)].is_none()
+                        && !self.is_own_eye(node, self.to_move)
+                        && self.place(node, scratch)
+                    {
+                        found = true;
+                        passes = 0;
+                        break;
+                    }
+                }
+                if !found {
+                    self.to_move = self.to_move.opponent();
+                    passes += 1;
+                    if passes >= 2 {
+                        break;
+                    }
+                }
+            }
+        }
+        if let Some(w) = self.winner {
+            return w;
+        }
+        // score by realms won
+        let l = self
+            .realm_won
+            .iter()
+            .filter(|w| **w == Some(Player::Light))
+            .count();
+        let d = self
+            .realm_won
+            .iter()
+            .filter(|w| **w == Some(Player::Dark))
+            .count();
+        match l.cmp(&d) {
+            std::cmp::Ordering::Greater => Player::Light,
+            std::cmp::Ordering::Less => Player::Dark,
+            std::cmp::Ordering::Equal => self.to_move.opponent(), // tempo tiebreak
+        }
+    }
+
+    fn legal_candidates(&self) -> Vec<NodeId> {
+        (0..self.board.node_count() as NodeId)
+            .filter(|&n| {
+                self.occ[n as usize].is_none()
+                    && self.realm_won[self.realm_of(n)].is_none()
+                    && !self.is_own_eye(n, self.to_move)
+            })
+            .collect()
+    }
+}
+
+struct Scratch {
+    buf: Vec<NodeId>,
+    seen: Vec<bool>,
+}
+
+struct NodeStats {
+    visits: u32,
+    wins: f64,
+    /// Move that led here (root children).
+    mv: NodeId,
+}
+
+/// Choose a trinity move by UCT search. Returns None on positions with no
+/// legal placement (caller falls back to Pass).
+pub fn choose_move_mcts(game: &Game, seed: u64, config: MctsConfig) -> Option<Move> {
+    let root = Sim::from_game(game);
+    let me = root.to_move;
+    let cands = root.legal_candidates();
+    if cands.is_empty() {
+        return None;
+    }
+    if cands.len() == 1 {
+        return Some(Move::Place(cands[0]));
+    }
+    let n = game.board().node_count();
+    let mut scratch = Scratch {
+        buf: Vec::with_capacity(64),
+        seen: vec![false; n],
+    };
+    let mut stats: Vec<NodeStats> = cands
+        .iter()
+        .map(|&mv| NodeStats {
+            visits: 0,
+            wins: 0.0,
+            mv,
+        })
+        .collect();
+    let mut rng = seed | 1;
+    let mut total = 0u32;
+    let max_playout_moves = (n as u32) * 2;
+    for _ in 0..config.playouts {
+        // select child by UCT
+        let mut best = 0usize;
+        let mut best_score = f64::MIN;
+        for (i, s) in stats.iter().enumerate() {
+            let score = if s.visits == 0 {
+                f64::MAX - i as f64 // visit unvisited first, in order
+            } else {
+                s.wins / s.visits as f64
+                    + config.c * ((total.max(1) as f64).ln() / s.visits as f64).sqrt()
+            };
+            if score > best_score {
+                best_score = score;
+                best = i;
+            }
+        }
+        // simulate
+        let mut sim = root.clone();
+        if !sim.place(stats[best].mv, &mut scratch) {
+            // illegal under ko subtleties: mark as lost cause
+            stats[best].visits += 1;
+            total += 1;
+            continue;
+        }
+        let winner = sim.playout(&mut rng, &mut scratch, max_playout_moves);
+        stats[best].visits += 1;
+        if winner == me {
+            stats[best].wins += 1.0;
+        }
+        total += 1;
+    }
+    stats
+        .iter()
+        .max_by_key(|s| s.visits)
+        .map(|s| Move::Place(s.mv))
+}

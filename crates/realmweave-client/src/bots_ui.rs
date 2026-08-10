@@ -12,19 +12,28 @@ use realmweave_core::Move;
 /// Bot turn driver: when control is VsBot and it's the bot's color to move,
 /// compute a move (blocking is fine at this bot's speed: <1s typical) after
 /// a short human-feeling delay.
+/// In-flight AI computation: worker thread + result channel, so MCTS never
+/// blocks a frame. Tagged with the ply it was computed FOR — a stale result
+/// (user left / game changed) is discarded.
+#[derive(Resource, Default)]
+pub(crate) struct BotTask(Option<(u32, crossbeam_channel::Receiver<Option<Move>>)>);
+
 pub(crate) fn bot_turn(
     time: Res<Time>,
     mut think: Local<f32>,
     mut session: ResMut<GameSession>,
+    mut task: Local<BotTask>,
     tut: Option<Res<Tutorial>>,
 ) {
     let s = &mut session.0;
     let Control::VsBot(human) = s.control else {
         *think = 0.0;
+        task.0 = None;
         return;
     };
     if s.result().is_some() || s.game.to_move() == human {
         *think = 0.0;
+        task.0 = None;
         return;
     }
     // Tutorial pacing: pause while the player reads; play gently while
@@ -34,24 +43,62 @@ pub(crate) fn bot_turn(
         .unwrap_or(tutorial::BotMode::Full);
     if mode == tutorial::BotMode::Paused {
         *think = 0.0;
+        task.0 = None;
         return;
     }
+
+    // Poll a computation in flight.
+    if let Some((for_ply, rx)) = &task.0 {
+        if *for_ply != s.game.state().ply {
+            task.0 = None; // stale (game changed under us)
+        } else {
+            match rx.try_recv() {
+                Ok(mv) => {
+                    task.0 = None;
+                    if let Some(mv) = mv {
+                        let _ = s.game.play(mv);
+                    } else {
+                        let _ = s.game.play(realmweave_core::Move::Pass);
+                    }
+                }
+                Err(crossbeam_channel::TryRecvError::Empty) => {}
+                Err(crossbeam_channel::TryRecvError::Disconnected) => {
+                    task.0 = None;
+                    let _ = s.game.play(realmweave_core::Move::Pass);
+                }
+            }
+            return;
+        }
+    }
+
     *think += time.delta_secs();
-    if *think < 0.6 {
+    if *think < 0.4 {
         return; // brief pause so moves feel deliberate
     }
     *think = 0.0;
     let seed = 0xB07 ^ (s.game.state().ply as u64).wrapping_mul(2654435761);
-    let mv = match mode {
-        tutorial::BotMode::Gentle => gentle_bot_move(&s.game, seed),
-        _ => realmweave_bot::choose_move(&s.game, seed),
-    };
-    if let Some(mv) = mv {
-        let _ = s.game.play(mv);
-    } else {
-        // no candidate — pass if possible, else resign is never auto-played
-        let _ = s.game.play(realmweave_core::Move::Pass);
+    if mode == tutorial::BotMode::Gentle {
+        if let Some(mv) = gentle_bot_move(&s.game, seed) {
+            let _ = s.game.play(mv);
+        } else {
+            let _ = s.game.play(realmweave_core::Move::Pass);
+        }
+        return;
     }
+    // Spawn the full-strength search off-thread.
+    let (tx, rx) = crossbeam_channel::bounded(1);
+    let game_copy = realmweave_core::Game::replay(
+        realmweave_core::BoardGraph::new(s.game.board().definition().clone())
+            .expect("board round-trips"),
+        s.game.config().clone(),
+        &s.game.state().move_log,
+    )
+    .expect("live game replays");
+    task.0 = Some((s.game.state().ply, rx));
+    std::thread::spawn(move || {
+        let mv = realmweave_bot::choose_move(&game_copy, seed);
+        let _ = tx.send(mv);
+    });
 }
 
 /// Tutorial sparring: placements only (never cuts), grown from the bot's
@@ -155,7 +202,16 @@ pub(crate) fn duel_turn(
         .seed
         .wrapping_add(duel.game_no as u64 * 0x9E37)
         .wrapping_add(s.game.state().ply as u64);
-    let mv = realmweave_bot::choose_move(&s.game, seed).unwrap_or(realmweave_core::Move::Pass);
+    // Exhibition budget: light enough to stay under the pacing interval.
+    let mv = realmweave_bot::choose_move_with_budget(
+        &s.game,
+        seed,
+        realmweave_bot::mcts::MctsConfig {
+            playouts: 600,
+            c: 0.9,
+        },
+    )
+    .unwrap_or(realmweave_core::Move::Pass);
     if s.game.play(mv).is_err() {
         let _ = s.game.play(realmweave_core::Move::Pass);
         return;
