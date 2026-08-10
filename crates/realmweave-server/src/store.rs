@@ -137,6 +137,10 @@ impl Store {
             .map_err(|e| sqlx::Error::Decode(Box::new(e)))?;
         Ok(Some(realmweave_core::GameRecord {
             config,
+            // Server-side records reconstruct from the event log; the
+            // fingerprint isn't persisted per-game (boards are pinned by
+            // the server's own loaded set).
+            board_fingerprint: None,
             moves,
             result,
         }))
