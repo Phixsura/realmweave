@@ -108,6 +108,8 @@ struct Duel {
     next_is_key: bool,
     /// Layer score after the previous move (to detect scoring).
     last_layers: [u8; 2],
+    /// Capture totals after the previous move (to narrate deaths).
+    last_captures: [u32; 2],
     /// Board settings to restart the next game with.
     board_size: usize,
     ruleset: String,
@@ -261,11 +263,22 @@ fn setup_camera(mut commands: Commands) {
             sw.autopilot = v.ends_with(":demo");
             commands.insert_resource(sw);
             commands.insert_resource(Active);
-        } else if v == "duel" {
-            let def = boardgen::generate_standard(91).expect("standard size");
+        } else if let Some(rest) = v.strip_prefix("duel") {
+            // RW_AUTOSTART=duel        → weave-layers-v3 exhibition
+            // RW_AUTOSTART=duel:v4     → trinity-y-v4 exhibition
+            let (ruleset, def) = if rest == ":v4" {
+                (
+                    realmweave_core::TRINITY_Y_V4,
+                    boardgen::generate_trinity(14).expect("trinity board"),
+                )
+            } else {
+                (
+                    realmweave_core::WEAVE_LAYERS_V3,
+                    boardgen::generate_standard(91).expect("standard size"),
+                )
+            };
             let board = BoardGraph::new(def).expect("valid board");
-            let mut session =
-                Session::hotseat_with_rules(board, false, realmweave_core::WEAVE_LAYERS_V3);
+            let mut session = Session::hotseat_with_rules(board, false, ruleset);
             session.control = Control::BotDuel;
             commands.insert_resource(GameSession(session));
             commands.insert_resource(Net(None));
@@ -279,8 +292,9 @@ fn setup_camera(mut commands: Commands) {
                 seed: 0xD0E1,
                 next_is_key: false,
                 last_layers: [0, 0],
+                last_captures: [0, 0],
                 board_size: 91,
-                ruleset: realmweave_core::WEAVE_LAYERS_V3.to_string(),
+                ruleset: ruleset.to_string(),
             });
         }
     }
@@ -1063,13 +1077,18 @@ fn duel_turn(
             return;
         }
         duel.game_no += 1;
-        let def = boardgen::generate_standard(duel.board_size).expect("standard size");
+        let def = if duel.ruleset == realmweave_core::TRINITY_Y_V4 {
+            boardgen::generate_trinity(14).expect("trinity board")
+        } else {
+            boardgen::generate_standard(duel.board_size).expect("standard size")
+        };
         let board = BoardGraph::new(def).expect("valid board");
         let mut next = Session::hotseat_with_rules(board, false, &duel.ruleset.clone());
         next.control = Control::BotDuel;
         let opener = format!("—— 第 {} 局开始 ——", duel.game_no);
         push_commentary(&mut duel.commentary, opener);
         duel.last_layers = [0, 0];
+        duel.last_captures = [0, 0];
         *s = next;
         return;
     }
@@ -1131,6 +1150,21 @@ fn duel_turn(
         line.push_str(" 🕸 编织成形——下一手是生死劫！");
     }
     push_commentary(&mut duel.commentary, line);
+    // Capture happened? (trinity death rule)
+    let caps_now = s.game.state().captures;
+    if caps_now != duel.last_captures {
+        let (who, n) = if caps_now[0] > duel.last_captures[0] {
+            (Player::Light, caps_now[0] - duel.last_captures[0])
+        } else {
+            (Player::Dark, caps_now[1] - duel.last_captures[1])
+        };
+        push_commentary(
+            &mut duel.commentary,
+            format!("☠ {} 提掉对方 {n} 子——无气之链离场。", who.name()),
+        );
+        duel.next_is_key = true;
+        duel.last_captures = caps_now;
+    }
     // Layer scored this move? (layers changed = petrification happened)
     let layers_now = s.game.state().layers;
     if layers_now != duel.last_layers {
@@ -1139,14 +1173,21 @@ fn duel_turn(
         } else {
             Player::Dark
         };
-        push_commentary(
-            &mut duel.commentary,
+        let line = if s.game.config().ruleset_id == realmweave_core::TRINITY_Y_V4 {
+            format!(
+                "⚖ {} 织成一个界域（{}:{}）！该界封印，战火转移到其余界域。",
+                who.name(),
+                layers_now[0],
+                layers_now[1]
+            )
+        } else {
             format!(
                 "⛰ {} 织成第 {} 层！整张网固化成世界结构，双方剪刀补给 +2，棋局在变形后的世界继续。",
                 who.name(),
                 layers_now[player_idx(who)]
-            ),
-        );
+            )
+        };
+        push_commentary(&mut duel.commentary, line);
         duel.next_is_key = true;
         duel.last_layers = layers_now;
     }
@@ -1343,7 +1384,11 @@ fn menu_ui(mut commands: Commands, mut egui_ctx: EguiContexts, mut ui_state: Res
                     .on_hover_text("两个 AI 慢速对弈，每手播报意图")
                     .clicked()
             {
-                let def = boardgen::generate_standard(ui_state.board_size).expect("standard size");
+                let def = if ui_state.ruleset == realmweave_core::TRINITY_Y_V4 {
+                    boardgen::generate_trinity(14).expect("trinity board")
+                } else {
+                    boardgen::generate_standard(ui_state.board_size).expect("standard size")
+                };
                 let board = BoardGraph::new(def).expect("valid board");
                 let mut session = Session::hotseat_with_rules(board, false, &ui_state.ruleset);
                 session.control = Control::BotDuel;
@@ -1359,6 +1404,7 @@ fn menu_ui(mut commands: Commands, mut egui_ctx: EguiContexts, mut ui_state: Res
                     seed: 0xD0E1,
                     next_is_key: false,
                     last_layers: [0, 0],
+                    last_captures: [0, 0],
                     board_size: ui_state.board_size,
                     ruleset: ui_state.ruleset.clone(),
                 });
