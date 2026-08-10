@@ -128,17 +128,21 @@ pub(crate) fn game_hud(
             }
             if s.game.config().ruleset_id == realmweave_core::TRIFORCE_V5 {
                 use realmweave_core::rules::Triforce;
-                let lw = Triforce::weave_progress(s.game.board(), s.game.state(), Player::Light);
-                let dw = Triforce::weave_progress(s.game.board(), s.game.state(), Player::Dark);
+                let (lw, ll) =
+                    Triforce::weave_progress(s.game.board(), s.game.state(), Player::Light);
+                let (dw, dl) =
+                    Triforce::weave_progress(s.game.board(), s.game.state(), Player::Dark);
                 ui.label(
                     egui::RichText::new(format!("🕸 织脉 白 {lw}/3 | 黑 {dw}/3"))
                         .strong()
                         .size(16.0),
                 );
-                if s.result().is_none() && lw == 2 {
+                // Lone corner stones touch two sides by geometry; only a
+                // grown group is a genuine "one side away" threat.
+                if s.result().is_none() && lw == 2 && ll >= 4 {
                     ui.colored_label(egui::Color32::GOLD, "白差一边！");
                 }
-                if s.result().is_none() && dw == 2 {
+                if s.result().is_none() && dw == 2 && dl >= 4 {
                     ui.colored_label(egui::Color32::LIGHT_RED, "黑差一边！");
                 }
             }

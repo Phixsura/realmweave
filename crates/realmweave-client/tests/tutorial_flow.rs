@@ -1,54 +1,65 @@
-//! Tutorial step conditions verified against a real scripted trinity game
-//! through the same core APIs the tutorial panel reads.
+//! Tutorial step conditions verified against a real scripted TRIFORCE game
+//! through the same core APIs the tutorial panel reads (the tutorial now
+//! runs on the merged-triangle flagship).
 #![allow(clippy::unwrap_used, clippy::expect_used)] // test code
 
-use realmweave_core::rules::TrinityY;
-use realmweave_core::{boardgen, BoardGraph, Game, GameConfig, Move, Player, TRINITY_Y_V4};
+use realmweave_core::rules::Triforce;
+use realmweave_core::{boardgen, BoardGraph, Game, GameConfig, Move, Player, TRIFORCE_V5};
 
 #[test]
 fn scripted_tutorial_conditions_hold() {
-    let side = 8usize;
-    let def = boardgen::generate_trinity(side).unwrap();
+    let side = 10usize; // menu maps size 19 → triforce side 10
+    let def = boardgen::generate_triforce(side).unwrap();
     let board = BoardGraph::new(def).unwrap();
-    let cfg = GameConfig::new(board.definition().id.clone()).with_ruleset(TRINITY_Y_V4);
+    let cfg = GameConfig::new(board.definition().id.clone()).with_ruleset(TRIFORCE_V5);
     let mut game = Game::new(board, cfg).unwrap();
     let idx = |r: usize, c: usize| (r * (r + 1) / 2 + c) as u16;
 
-    let per = side * (side + 1) / 2;
-    // Light builds down the left edge; Dark fills distinct realm-2 cells.
-    let mut dark_i = 0usize;
+    // Dark filler: interior cells rows 1..4 (none touch big sides).
+    let mut dark_cells = Vec::new();
+    for r in 2..7 {
+        for c in 1..r {
+            dark_cells.push(idx(r, c));
+        }
+    }
+    let mut di = 0;
     let mut dark = move || {
-        dark_i += 1;
-        (2 * per + dark_i - 1) as u16
+        di += 1;
+        dark_cells[di - 1]
     };
 
-    // FirstStone: human (Light) moves at even indices.
-    game.play(Move::Place(idx(3, 1))).unwrap();
+    // FirstStone: human (Light) at even move indices.
+    game.play(Move::Place(idx(6, 3))).unwrap(); // heart-ish interior
     assert_eq!(game.state().move_log.len() % 2, 1);
     game.play(Move::Place(dark())).unwrap();
 
-    // TouchTwoSides: reach the left edge, then the bottom row.
-    game.play(Move::Place(idx(3, 0))).unwrap(); // touches left
-    game.play(Move::Place(dark())).unwrap();
-    for r in 4..side {
-        game.play(Move::Place(idx(r, 0))).unwrap();
+    // TouchTwoSides: build to the left edge then along the bottom.
+    for r in 7..side {
+        game.play(Move::Place(idx(r, 0))).unwrap(); // toward bottom-left
         game.play(Move::Place(dark())).unwrap();
     }
-    // bottom-left corner touches left + bottom = 2 sides
-    let side_mask = boardgen::trinity_sides(side, idx(side - 1, 0));
-    assert!(side_mask.count_ones() >= 2, "corner touches two sides");
+    // Group now touches left (c==0) + bottom (r==9): two sides, len > 1.
+    let (sides, len) = Triforce::weave_progress(game.board(), game.state(), Player::Light);
+    assert!(sides >= 2, "left edge run touches two sides");
+    assert!(len >= 3, "genuine group, not a lone corner");
 
-    // WinRealm condition: no Y yet; complete the bottom row → Y.
-    assert!(TrinityY::realm_winner(game.board(), game.state(), 0).is_none());
+    // Win: extend along the bottom row to the right side.
     for c in 1..side {
         game.play(Move::Place(idx(side - 1, c))).unwrap();
-        if c < side - 1 {
-            game.play(Move::Place(dark())).unwrap();
+        if game.result().is_some() {
+            break;
         }
+        game.play(Move::Place(dark())).unwrap();
     }
     assert_eq!(
-        TrinityY::realm_winner(game.board(), game.state(), 0),
-        Some(Player::Light),
-        "left edge + bottom row = Y"
+        Triforce::weaver(game.board(), game.state()),
+        Some(Player::Light)
     );
+    assert!(matches!(
+        game.result(),
+        Some(realmweave_core::GameResult::Win {
+            player: Player::Light,
+            ..
+        })
+    ));
 }

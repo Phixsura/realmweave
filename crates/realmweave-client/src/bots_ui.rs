@@ -335,8 +335,8 @@ pub(crate) fn duel_turn(
     // moment the endgame begins.
     if s.game.config().ruleset_id == realmweave_core::TRIFORCE_V5 && s.result().is_none() {
         use realmweave_core::rules::Triforce;
-        let prog = Triforce::weave_progress(&s.game.board().clone(), s.game.state(), mover);
-        if prog == 2 && !duel.two_sides_announced[player_idx(mover)] {
+        let (prog, glen) = Triforce::weave_progress(s.game.board(), s.game.state(), mover);
+        if prog == 2 && glen >= 4 && !duel.two_sides_announced[player_idx(mover)] {
             duel.two_sides_announced[player_idx(mover)] = true;
             push_commentary(
                 &mut duel.commentary,

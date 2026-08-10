@@ -68,29 +68,36 @@ impl Triforce {
     }
 
     /// Best sides-touched count for `player` (0..=3) — the HUD's weave
-    /// progress meter. 3 = woven.
-    pub fn weave_progress(board: &BoardGraph, state: &GameState, player: Player) -> u32 {
+    /// progress meter. 3 = woven. Returns (sides, group_len) for the best
+    /// group so callers can distinguish a lone corner stone (which touches
+    /// two sides by geometry) from a genuine two-sided weave.
+    pub fn weave_progress(board: &BoardGraph, state: &GameState, player: Player) -> (u32, usize) {
         let side = Self::side_of(board);
         let n = board.node_count();
         let mut visited = vec![false; n];
-        let mut best = 0u32;
+        let mut best = (0u32, 0usize);
         for start in 0..n as NodeId {
             if state.occupant(start) != Some(player) || visited[start as usize] {
                 continue;
             }
             let mut queue = VecDeque::from([start]);
             visited[start as usize] = true;
+            let mut len = 1usize;
             let mut touch = crate::boardgen::triforce_sides(side, start);
             while let Some(cur) = queue.pop_front() {
                 for &nb in board.neighbors(cur) {
                     if !visited[nb as usize] && state.occupant(nb) == Some(player) {
                         visited[nb as usize] = true;
                         queue.push_back(nb);
+                        len += 1;
                         touch |= crate::boardgen::triforce_sides(side, nb);
                     }
                 }
             }
-            best = best.max(touch.count_ones());
+            let cand = (touch.count_ones(), len);
+            if cand > best {
+                best = cand;
+            }
         }
         best
     }

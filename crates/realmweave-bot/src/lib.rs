@@ -586,7 +586,15 @@ pub fn choose_move_with_budget(game: &Game, seed: u64, budget: mcts::MctsConfig)
                 .find(|m| matches!(m, Move::Place(_)))
                 .or(Some(Move::Pass));
         }
-        return Some(Move::Pass);
+        // MCTS found no candidate (every empty is an own eye or superko-
+        // masked). Never pass while a legal placement exists: mutual
+        // passing would end an undecided game as a draw the Y theorem says
+        // someone can still win.
+        return game
+            .legal_moves()
+            .into_iter()
+            .find(|m| matches!(m, Move::Place(_)))
+            .or(Some(Move::Pass));
     }
     let me = game.to_move();
     let cands: Vec<Move> = candidates(game, me)

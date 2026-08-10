@@ -270,10 +270,17 @@ struct UiState {
 impl Default for UiState {
     fn default() -> Self {
         if let Some(p) = settings::load() {
+            // Prefs may predate ruleset renames/deletions: unknown ids fall
+            // back to the flagship instead of panicking at game start.
+            let ruleset = if realmweave_core::ALL_RULESETS.contains(&p.ruleset.as_str()) {
+                p.ruleset
+            } else {
+                realmweave_core::TRIFORCE_V5.to_string()
+            };
             return UiState {
                 board_size: p.board_size,
                 pie_rule: p.pie_rule,
-                ruleset: p.ruleset,
+                ruleset,
                 ai_level: AiLevel::Standard,
                 world_seed: 0,
                 server_addr: p.server_addr,
