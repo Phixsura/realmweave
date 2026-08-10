@@ -8,8 +8,10 @@ Standard boards are **centered hexagonal** graphs: radius `r` gives
 | Board | Radius | Nodes/realm | Total |
 |---|---|---|---|
 | Small | 2 | 19 | 57 |
-| Standard | 3 | 37 | 111 |
-| Grand | 4 | 61 | 183 |
+| Classic | 3 | 37 | 111 |
+| Large | 4 | 61 | 183 |
+| Standard | 5 | 91 | 273 |
+| Grand | 6 | 127 | 381 |
 
 Each realm uses axial coordinates `(q, r)` with 6-neighbor adjacency, which
 provides sixfold rotational and reflectional symmetry by construction. Node
@@ -57,3 +59,23 @@ Symmetry & fairness — never assumed from visuals:
 `realmweave-sim fairness` additionally reports degree histograms, minimum
 vertex cuts / vertex-disjoint route counts between origin pairs (Menger), and
 flags single-node bottlenecks ("super nodes").
+
+## The triangle family (trinity boards)
+
+Flagship boards are **triangular** graphs, one per realm: side length `n`
+gives `n(n+1)/2` nodes per realm. Coordinates are `(row, col)` with row
+`r` holding `r+1` cells; adjacency is the 6-neighbor triangular lattice
+(`(r,c±1)`, `(r±1,c)`, `(r-1,c-1)`, `(r+1,c+1)`).
+
+| Board | Side | Nodes/realm | Total |
+|---|---|---|---|
+| Tutorial | 8 | 36 | 108 |
+| Standard | 14 | 105 | 315 |
+
+Sides are the goals (the game of Y): side 0 = left edge (`c==0`), side 1 =
+right edge (`c==r`), side 2 = bottom row (`r==n-1`); `trinity_sides`
+returns the bitmask. Trinity boards have **no origins and no portals** —
+the three realms are deliberately disconnected, coupled only through the
+shared turn clock. The validator checks per-realm connectivity and the
+left-right mirror automorphism (`c → r−c`); the 120° rotations are
+guaranteed by the generator's uniform construction.
