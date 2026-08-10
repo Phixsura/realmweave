@@ -193,54 +193,71 @@ pub fn link_cost(game: &Game, player: Player) -> i64 {
 /// multi-source BFS: cost from each side, summed at the best junction).
 fn trinity_cost(game: &Game, player: Player) -> i64 {
     let bd = game.board();
+    let st = game.state();
     let n = bd.node_count();
     let per_realm = n / 3;
     let side_len = (((8 * per_realm + 1) as f64).sqrt() as usize - 1) / 2;
+    // Entry cost with the same anti-ruler medicine as the hex eval:
+    // contested empties cost more, and deterministic terrain grain breaks
+    // the tie between the many equal-length straight paths — without it
+    // BFS always prefers axis-aligned routes and the bot fills rulers.
+    let entry = |node: NodeId| -> Option<i64> {
+        match st.occupant(node) {
+            Some(p) if p == player => Some(0),
+            Some(_) => None,
+            None => {
+                let enemy_adj = bd
+                    .neighbors(node)
+                    .iter()
+                    .filter(|&&nb| st.occupant(nb) == Some(player.opponent()))
+                    .count() as i64;
+                let grain = {
+                    let mut x = (node as u64 + 1).wrapping_mul(0x9E3779B97F4A7C15);
+                    x ^= x >> 33;
+                    (x % 2) as i64
+                };
+                // Edge-hugging penalty: on a triangle the bottom row touches
+                // all three sides, so a naked edge line is the "cheapest" Y —
+                // and the weakest (Y wisdom: edge play loses to cutting).
+                // Charge rim cells extra so routes arc through the interior.
+                let sides = crate::boardgen::trinity_sides(side_len, node);
+                let edge_pen = if sides != 0 { 6 } else { 0 };
+                Some(4 + grain + edge_pen + 2 * enemy_adj.min(3))
+            }
+        }
+    };
     let mut total = 0i64;
     for realm in 0..3 {
         let lo = (realm * per_realm) as NodeId;
         let hi = lo + per_realm as NodeId;
-        // dist from each of the 3 sides via 0/1-BFS
+        // dist from each of the 3 sides via Dijkstra over entry costs
         let mut dists: Vec<Vec<i64>> = Vec::new();
         for side_bit in [1u8, 2, 4] {
             let mut dist = vec![i64::MAX; n];
-            let mut dq = std::collections::VecDeque::new();
+            let mut heap = std::collections::BinaryHeap::new();
             for start in lo..hi {
                 if crate::boardgen::trinity_sides(side_len, start) & side_bit == 0 {
                     continue;
                 }
-                let c = match game.state().occupant(start) {
-                    Some(p) if p == player => 0,
-                    None => 1,
-                    _ => continue,
-                };
+                let Some(c) = entry(start) else { continue };
                 if c < dist[start as usize] {
                     dist[start as usize] = c;
-                    if c == 0 {
-                        dq.push_front(start);
-                    } else {
-                        dq.push_back(start);
-                    }
+                    heap.push(std::cmp::Reverse((c, start)));
                 }
             }
-            while let Some(cur) = dq.pop_front() {
+            while let Some(std::cmp::Reverse((d, cur))) = heap.pop() {
+                if d > dist[cur as usize] {
+                    continue;
+                }
                 for &nb in bd.neighbors(cur) {
                     if nb < lo || nb >= hi {
                         continue;
                     }
-                    let c = match game.state().occupant(nb) {
-                        Some(p) if p == player => 0,
-                        None => 1,
-                        _ => continue,
-                    };
-                    let nd = dist[cur as usize] + c;
+                    let Some(c) = entry(nb) else { continue };
+                    let nd = d + c;
                     if nd < dist[nb as usize] {
                         dist[nb as usize] = nd;
-                        if c == 0 {
-                            dq.push_front(nb);
-                        } else {
-                            dq.push_back(nb);
-                        }
+                        heap.push(std::cmp::Reverse((nd, nb)));
                     }
                 }
             }
@@ -257,9 +274,10 @@ fn trinity_cost(game: &Game, player: Player) -> i64 {
             if a == i64::MAX || b == i64::MAX || c == i64::MAX {
                 continue;
             }
-            // junction counted once if empty
-            let overlap = match game.state().occupant(v) {
-                None => 2,
+            // junction counted once if empty (approx: subtract twice the
+            // typical empty cost so the shared node isn't triple-billed)
+            let overlap = match st.occupant(v) {
+                None => 9,
                 _ => 0,
             };
             best = best.min(a + b + c - overlap);
@@ -458,7 +476,15 @@ fn shape_score(game: &Game, me: Player, node: NodeId) -> f64 {
     };
     let realm = def.nodes[node as usize].realm;
     let st = game.state();
-    const DIRS: [[i32; 2]; 6] = [[1, 0], [0, 1], [-1, 1], [-1, 0], [0, -1], [1, -1]];
+    // Straight directions in this board's coordinate system. Hex realms
+    // use axial coords; trinity realms use (row, col) on a triangular
+    // grid, whose six neighbor steps are below — using hex dirs there
+    // means the anti-march terms simply never fire (the "always straight
+    // lines" bug).
+    let is_trinity = def.origins.is_empty();
+    const HEX_DIRS: [[i32; 2]; 6] = [[1, 0], [0, 1], [-1, 1], [-1, 0], [0, -1], [1, -1]];
+    const TRI_DIRS: [[i32; 2]; 6] = [[0, 1], [0, -1], [1, 0], [-1, 0], [1, 1], [-1, -1]];
+    let dirs: [[i32; 2]; 6] = if is_trinity { TRI_DIRS } else { HEX_DIRS };
     let occ_at = |a: [i32; 2]| -> bool {
         bd.axial_index()
             .get(&(realm, a))
@@ -467,13 +493,13 @@ fn shape_score(game: &Game, me: Player, node: NodeId) -> f64 {
     };
     let mut score = 0.0;
     let mut solid_contacts = 0;
-    for d in DIRS {
+    for d in dirs {
         let b1 = [ax[0] - d[0], ax[1] - d[1]];
         let b2 = [ax[0] - 2 * d[0], ax[1] - 2 * d[1]];
         if occ_at(b1) {
             solid_contacts += 1;
             if occ_at(b2) {
-                score -= 6.0; // third stone in a straight line: don't march
+                score -= 14.0; // third stone in a straight line: don't march
             }
         }
         // One-point jump (拆一): own stone two away with the gap free.
@@ -490,10 +516,10 @@ fn shape_score(game: &Game, me: Player, node: NodeId) -> f64 {
     if solid_contacts >= 3 {
         score -= 2.0;
     }
-    // Diagonal (尖): axial "diagonals" are dir_i + dir_{i+1}.
+    // Diagonal (尖): "diagonals" are dir_i + dir_{i+1} of adjacent dirs.
     for i in 0..6 {
-        let d1 = DIRS[i];
-        let d2 = DIRS[(i + 1) % 6];
+        let d1 = dirs[i];
+        let d2 = dirs[(i + 1) % 6];
         let diag = [ax[0] + d1[0] + d2[0], ax[1] + d1[1] + d2[1]];
         let via_a = [ax[0] + d1[0], ax[1] + d1[1]];
         let via_b = [ax[0] + d2[0], ax[1] + d2[1]];
@@ -545,8 +571,14 @@ pub fn choose_move(game: &Game, seed: u64) -> Option<Move> {
     scored.truncate(12);
 
     // Pass 2: opponent's best static reply (from THEIR candidate set).
+    // The shape term must survive into the final pick, or pass 1's
+    // anti-march filtering is undone right here.
     let mut best: Option<(f64, Move)> = None;
     for &(_, mv) in &scored {
+        let shape = match mv {
+            Move::Place(n) => shape_score(game, me, n),
+            _ => 0.0,
+        };
         let bd = BoardGraph::new(game.board().definition().clone()).ok()?;
         let mut sim = Game::replay(bd, game.config().clone(), &game.state().move_log).ok()?;
         if sim.play(mv).is_err() {
@@ -585,6 +617,7 @@ pub fn choose_move(game: &Game, seed: u64) -> Option<Move> {
                 }
             }
         };
+        let after = after + shape;
         if best.map(|(b, _)| after > b).unwrap_or(true) {
             best = Some((after, mv));
         }
