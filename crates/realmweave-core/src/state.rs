@@ -137,10 +137,13 @@ pub struct GameState {
     /// Remaining scissors per player ([Light, Dark]; weave-sever-v2).
     #[serde(default)]
     pub scissors: [u8; 2],
-    /// Nodes petrified into neutral world structure (weave-layers-v3).
-    /// Impassable for both players, unplaceable, adjacent edges uncuttable.
+    /// Nodes petrified into world structure (weave-layers-v3), tagged with
+    /// the player whose weave fossilized there. Unplaceable and uncuttable
+    /// for everyone; traversable ONLY by the OTHER player — your fossil
+    /// becomes your opponent's roads ("the world's memory serves your
+    /// enemy"), which is the anti-snowball engine of the layers game.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub petrified: Vec<bool>,
+    pub petrified: Vec<Option<Player>>,
     /// Completed weave layers per player ([Light, Dark]; weave-layers-v3).
     #[serde(default)]
     pub layers: [u8; 2],
@@ -174,7 +177,29 @@ impl GameState {
 
     /// Is this node petrified world structure (weave-layers-v3)?
     pub fn is_petrified(&self, node: NodeId) -> bool {
-        self.petrified.get(node as usize).copied().unwrap_or(false)
+        self.petrified_by(node).is_some()
+    }
+
+    /// Who petrified this node, if anyone.
+    pub fn petrified_by(&self, node: NodeId) -> Option<Player> {
+        self.petrified.get(node as usize).copied().flatten()
+    }
+
+    /// Can `player` traverse this node's fossil? Only the OPPONENT's
+    /// fossils are roads, and only while that opponent is NOT behind on
+    /// layers — the leader's dead networks serve the chaser, never the
+    /// reverse. (Equal layers: opponent fossils are roads for both.)
+    pub fn fossil_road_for(&self, node: NodeId, player: Player) -> bool {
+        let owner = match self.petrified_by(node) {
+            Some(o) if o == player.opponent() => o,
+            _ => return false,
+        };
+        let owner_idx = match owner {
+            Player::Light => 0,
+            Player::Dark => 1,
+        };
+        // Road only if the fossil's owner is not behind (>= my layers).
+        self.layers[owner_idx] >= self.layers[1 - owner_idx]
     }
 
     pub fn is_finished(&self) -> bool {

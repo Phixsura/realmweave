@@ -32,7 +32,12 @@ fn noise(seed: u64, ply: u32, k: usize) -> f64 {
 fn entry_cost(game: &Game, player: Player, node: NodeId) -> Option<u32> {
     let st = game.state();
     if st.is_petrified(node) {
-        return None; // world structure: impassable
+        // Opponent fossils are free roads; your own are walls.
+        return if st.fossil_road_for(node, player) {
+            Some(0)
+        } else {
+            None
+        };
     }
     match st.occupant(node) {
         Some(p) if p == player => Some(0),
@@ -43,8 +48,15 @@ fn entry_cost(game: &Game, player: Player, node: NodeId) -> Option<u32> {
                 .live_neighbors(node, &st.cut_edges)
                 .filter(|&nb| st.occupant(nb) == Some(player.opponent()))
                 .count() as u32;
-            // base 2 per empty; +1 per adjacent enemy stone (cap +3)
-            Some(2 + enemy_adj.min(3))
+            // Deterministic terrain grain (0..=1): breaks the tie between
+            // the many equal-cost axis paths so routes meander naturally.
+            let grain = {
+                let mut x = (node as u64 + 1).wrapping_mul(0x9E3779B97F4A7C15);
+                x ^= x >> 33;
+                (x % 2) as u32
+            };
+            // base 4 per empty; +2 per adjacent enemy stone (cap +6)
+            Some(4 + grain + 2 * enemy_adj.min(3))
         }
     }
 }
@@ -225,6 +237,16 @@ fn candidates(game: &Game, me: Player) -> Vec<Move> {
     let st = game.state();
     let mut out = Vec::new();
 
+    // Plan-following: empty nodes on my current cheapest origin routes.
+    // Without these the bot goes blind after petrification reshapes the
+    // board (frontier stones are far from any useful path) and late game
+    // degenerates into dead filler.
+    for n in best_routes(game, me) {
+        if st.occupant(n).is_none() && !st.is_petrified(n) {
+            out.push(Move::Place(n));
+        }
+    }
+
     // Placements: empty nodes adjacent to any stone, or near origins.
     let mut near_action = vec![false; bd.node_count()];
     for n in 0..bd.node_count() as NodeId {
@@ -251,6 +273,12 @@ fn candidates(game: &Game, me: Player) -> Vec<Move> {
         }
     }
 
+    out.sort_unstable_by_key(|m| match m {
+        Move::Place(n) => *n as u32,
+        _ => u32::MAX,
+    });
+    out.dedup();
+
     // Cuts: only when we have scissors — target edges between/next to
     // opponent stones (their bridges) or on their cheapest path.
     let my_scissors = st.scissors[match me {
@@ -273,6 +301,71 @@ fn candidates(game: &Game, me: Player) -> Vec<Move> {
         }
     }
     out
+}
+
+/// Shape score for placing at `node`: Go players avoid solid straight
+/// chains (inefficient, cuttable in one sweep) and love diagonal contact
+/// (尖) and one-point jumps — each stone adds new routes instead of
+/// lengthening one. Returns a penalty (negative) for straight-chain
+/// extension and a small bonus for diagonal relationships.
+fn shape_score(game: &Game, me: Player, node: NodeId) -> f64 {
+    let bd = game.board();
+    let def = bd.definition();
+    let Some(ax) = def.nodes[node as usize].axial else {
+        return 0.0;
+    };
+    let realm = def.nodes[node as usize].realm;
+    let st = game.state();
+    const DIRS: [[i32; 2]; 6] = [[1, 0], [0, 1], [-1, 1], [-1, 0], [0, -1], [1, -1]];
+    let occ_at = |a: [i32; 2]| -> bool {
+        bd.axial_index()
+            .get(&(realm, a))
+            .map(|&id| st.occupant(id) == Some(me))
+            .unwrap_or(false)
+    };
+    let mut score = 0.0;
+    let mut solid_contacts = 0;
+    for d in DIRS {
+        let b1 = [ax[0] - d[0], ax[1] - d[1]];
+        let b2 = [ax[0] - 2 * d[0], ax[1] - 2 * d[1]];
+        if occ_at(b1) {
+            solid_contacts += 1;
+            if occ_at(b2) {
+                score -= 6.0; // third stone in a straight line: don't march
+            }
+        }
+        // One-point jump (拆一): own stone two away with the gap free.
+        let gap_free = bd
+            .axial_index()
+            .get(&(realm, b1))
+            .map(|&id| st.occupant(id).is_none() && !st.is_petrified(id))
+            .unwrap_or(false);
+        if gap_free && occ_at(b2) {
+            score += 1.5;
+        }
+    }
+    // Heavy clumping is also not 步步为营: more than 2 solid contacts is slow.
+    if solid_contacts >= 3 {
+        score -= 2.0;
+    }
+    // Diagonal (尖): axial "diagonals" are dir_i + dir_{i+1}.
+    for i in 0..6 {
+        let d1 = DIRS[i];
+        let d2 = DIRS[(i + 1) % 6];
+        let diag = [ax[0] + d1[0] + d2[0], ax[1] + d1[1] + d2[1]];
+        let via_a = [ax[0] + d1[0], ax[1] + d1[1]];
+        let via_b = [ax[0] + d2[0], ax[1] + d2[1]];
+        let free = |a: [i32; 2]| {
+            bd.axial_index()
+                .get(&(realm, a))
+                .map(|&id| st.occupant(id).is_none() && !st.is_petrified(id))
+                .unwrap_or(false)
+        };
+        if occ_at(diag) && free(via_a) && free(via_b) {
+            score += 1.2; // 尖: two ways to connect, springy shape
+        }
+    }
+    score
 }
 
 /// Choose the bot's move: 2-ply search (my move → opponent's best reply by
@@ -299,7 +392,11 @@ pub fn choose_move(game: &Game, seed: u64) -> Option<Move> {
         if sim.play(mv).is_err() {
             continue;
         }
-        let s = evaluate(&sim, me) + noise(seed, ply, k) * 0.3;
+        let shape = match mv {
+            Move::Place(n) => shape_score(game, me, n),
+            _ => 0.0,
+        };
+        let s = evaluate(&sim, me) + shape + noise(seed, ply, k) * 0.3;
         scored.push((s, mv));
     }
     scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));

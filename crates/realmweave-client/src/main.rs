@@ -158,7 +158,7 @@ struct UiState {
 impl Default for UiState {
     fn default() -> Self {
         UiState {
-            board_size: 127,
+            board_size: 91,
             pie_rule: false,
             ruleset: realmweave_core::WEAVE_LAYERS_V3.to_string(),
             world_seed: 0,
@@ -210,8 +210,10 @@ struct Palette {
     last_move: Handle<StandardMaterial>,
     light_territory: Handle<StandardMaterial>,
     dark_territory: Handle<StandardMaterial>,
-    /// Petrified world structure (weave-layers-v3).
-    petrified: Handle<StandardMaterial>,
+    /// Petrified world structure (weave-layers-v3), tinted by which
+    /// player's weave fossilized there.
+    petrified_light: Handle<StandardMaterial>,
+    petrified_dark: Handle<StandardMaterial>,
 }
 
 /// Load a system CJK font so Chinese commentary renders (egui's default
@@ -260,7 +262,7 @@ fn setup_camera(mut commands: Commands) {
             commands.insert_resource(sw);
             commands.insert_resource(Active);
         } else if v == "duel" {
-            let def = boardgen::generate_standard(127).expect("standard size");
+            let def = boardgen::generate_standard(91).expect("standard size");
             let board = BoardGraph::new(def).expect("valid board");
             let mut session =
                 Session::hotseat_with_rules(board, false, realmweave_core::WEAVE_LAYERS_V3);
@@ -277,7 +279,7 @@ fn setup_camera(mut commands: Commands) {
                 seed: 0xD0E1,
                 next_is_key: false,
                 last_layers: [0, 0],
-                board_size: 127,
+                board_size: 91,
                 ruleset: realmweave_core::WEAVE_LAYERS_V3.to_string(),
             });
         }
@@ -443,7 +445,8 @@ fn sync_board_visuals(
             last_move: materials.add(node_material(Color::srgb(0.3, 0.85, 1.0), 2.8)),
             light_territory: materials.add(node_material(Color::srgb(0.75, 0.7, 0.5), 0.2)),
             dark_territory: materials.add(node_material(Color::srgb(0.7, 0.3, 0.25), 0.2)),
-            petrified: materials.add(node_material(Color::srgb(0.42, 0.42, 0.48), 0.0)),
+            petrified_light: materials.add(node_material(Color::srgb(0.55, 0.52, 0.42), 0.0)),
+            petrified_dark: materials.add(node_material(Color::srgb(0.45, 0.36, 0.36), 0.0)),
         };
         let shapes = Shapes {
             sphere: meshes.add(Sphere::new(0.34).mesh().ico(3).unwrap()),
@@ -584,7 +587,8 @@ fn sync_board_visuals(
         }
         transform.scale = Vec3::splat(scale);
         let handle = match (state.occupant(id), origins.get(&id)) {
-            _ if state.is_petrified(id) => &palette.petrified,
+            _ if state.petrified_by(id) == Some(Player::Light) => &palette.petrified_light,
+            _ if state.petrified_by(id) == Some(Player::Dark) => &palette.petrified_dark,
             _ if last_placed == Some(id) => &palette.last_move,
             (Some(Player::Light), Some(_)) => &palette.light_origin,
             (Some(Player::Dark), Some(_)) => &palette.dark_origin,

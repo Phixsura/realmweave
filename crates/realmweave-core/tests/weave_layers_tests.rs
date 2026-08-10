@@ -207,3 +207,38 @@ fn ply_cap_closes_the_game() {
     // so instead just assert the constant is in the agreed 400-500 band.
     assert!((400..=500).contains(&V3_PLY_CAP));
 }
+
+#[test]
+fn fossil_roads_serve_the_opponent_only() {
+    let mut game = new_game(19);
+    score_first_layer(&mut game);
+    let st = game.state();
+    let fossil = (0..game.board().node_count() as NodeId)
+        .find(|&n| st.is_petrified(n))
+        .expect("layer 1 petrified something");
+    // Light petrified it (Light scored): Light cannot traverse, Dark can
+    // (layers [1,0]: owner Light is not behind → road for Dark).
+    assert_eq!(st.petrified_by(fossil), Some(Player::Light));
+    assert!(
+        !st.fossil_road_for(fossil, Player::Light),
+        "own fossil = wall"
+    );
+    assert!(
+        st.fossil_road_for(fossil, Player::Dark),
+        "enemy fossil = road"
+    );
+}
+
+#[test]
+fn chaser_fossils_are_walls_to_the_leader() {
+    // Craft a state directly: Dark fossil exists but Dark is BEHIND on
+    // layers → not a road for Light (no help for the leader).
+    let game = new_game(19);
+    let mut st = game.state().clone();
+    st.petrified = vec![None; game.board().node_count()];
+    st.petrified[30] = Some(Player::Dark);
+    st.layers = [1, 0]; // Light leads; fossil owner Dark is behind
+    assert!(!st.fossil_road_for(30, Player::Light));
+    st.layers = [1, 1]; // equal again → road
+    assert!(st.fossil_road_for(30, Player::Light));
+}

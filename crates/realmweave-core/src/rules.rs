@@ -714,7 +714,7 @@ impl WeaveSeverV2 {
             }
         }
         if state.petrified.len() < board.node_count() {
-            state.petrified.resize(board.node_count(), false);
+            state.petrified.resize(board.node_count(), None);
         }
         let origin_adjacent: Vec<bool> = {
             let mut adj = vec![false; board.node_count()];
@@ -738,7 +738,7 @@ impl WeaveSeverV2 {
             }
             state.occupancy[n] = None;
             if !origin_adjacent[n] {
-                state.petrified[n] = true;
+                state.petrified[n] = Some(player);
             }
             // origin-adjacent: removed entirely (breathing room)
         }
@@ -1098,7 +1098,8 @@ pub fn permanently_connected(board: &BoardGraph, state: &GameState, player: Play
     queue.push_back(first);
     while let Some(cur) = queue.pop_front() {
         for next in board.live_neighbors(cur, &state.cut_edges) {
-            if !visited[next as usize] && !state.is_petrified(next) {
+            let blocked = state.is_petrified(next) && !state.fossil_road_for(next, player);
+            if !visited[next as usize] && !blocked {
                 visited[next as usize] = true;
                 queue.push_back(next);
             }
@@ -1112,11 +1113,13 @@ pub fn permanently_connected(board: &BoardGraph, state: &GameState, player: Play
 pub fn potential_origin_groups(board: &BoardGraph, state: &GameState, player: Player) -> u32 {
     let origins = board.definition().origins_of(player);
     let passable = |n: NodeId| {
-        !state.is_petrified(n)
-            && match state.occupant(n) {
-                Some(p) => p == player,
-                None => true,
-            }
+        if state.is_petrified(n) {
+            return state.fossil_road_for(n, player);
+        }
+        match state.occupant(n) {
+            Some(p) => p == player,
+            None => true,
+        }
     };
     let mut groups = 0u32;
     let mut assigned = vec![false; origins.len()];
@@ -1166,7 +1169,9 @@ fn cut_self_strangles(
     }
 }
 
-/// Realm weave over the LIVE graph (cut edges removed).
+/// Realm weave over the LIVE graph (cut edges removed). Opponent fossils
+/// count as traversable links in your weave — the enemy's dead network is
+/// your infrastructure (v3's anti-snowball rule).
 pub fn live_realm_weave(board: &BoardGraph, state: &GameState, player: Player) -> bool {
     let origins = board.definition().origins_of(player);
     let Some(&first) = origins.first() else {
@@ -1181,7 +1186,9 @@ pub fn live_realm_weave(board: &BoardGraph, state: &GameState, player: Player) -
     queue.push_back(first);
     while let Some(cur) = queue.pop_front() {
         for next in board.live_neighbors(cur, &state.cut_edges) {
-            if !visited[next as usize] && state.occupant(next) == Some(player) {
+            let mine = state.occupant(next) == Some(player);
+            let road = state.fossil_road_for(next, player);
+            if !visited[next as usize] && (mine || road) {
                 visited[next as usize] = true;
                 queue.push_back(next);
             }
