@@ -198,7 +198,11 @@ impl Game {
     ) -> Result<Self, GameError> {
         let mut game = Game::new(board, config)?;
         for mv in moves {
-            game.play(*mv)?;
+            // No undo history on replays: keeping every intermediate
+            // snapshot made replay O(n²) in memory for zero benefit
+            // (bot workers and review caches replay constantly).
+            let next = game.ruleset.apply_move(&game.board, &game.state, mv)?;
+            game.state = next;
         }
         Ok(game)
     }

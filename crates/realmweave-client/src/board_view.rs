@@ -198,6 +198,7 @@ pub(crate) fn sync_board_visuals(
     time: Res<Time>,
     mut camera: Query<(&mut OrbitCamera, &mut Transform), Without<NodeMarker>>,
     mut anim: Local<(u32, f32)>, // (ply we saw last, seconds since it changed)
+    mut review_cache: Local<Option<(usize, realmweave_core::GameState)>>,
     spawned: Option<Res<BoardSpawned>>,
     palette: Option<Res<Palette>>,
     shapes_res: Option<Res<Shapes>>,
@@ -332,19 +333,43 @@ pub(crate) fn sync_board_visuals(
     // Node materials + positions reflect state & view mode every frame
     // (≤400 nodes — trivially cheap, keeps logic out of the renderer).
     // Review mode: render the historical position at the cursor instead.
-    let review_state = view.review_cursor.and_then(|k| {
-        let bd = BoardGraph::new(game.board().definition().clone()).ok()?;
-        let moves = &game.state().move_log[..k.min(game.state().move_log.len())];
-        realmweave_core::Game::replay(bd, game.config().clone(), moves)
-            .ok()
-            .map(|g| g.state().clone())
-    });
-    let state = review_state.as_ref().unwrap_or_else(|| game.state());
+    // The replay is cached per cursor value — recomputing a 150-move replay
+    // (plus a BoardGraph clone) EVERY FRAME was measurable jank.
+    let review_state: Option<&realmweave_core::GameState> = match view.review_cursor {
+        None => {
+            *review_cache = None;
+            None
+        }
+        Some(k) => {
+            let stale = review_cache
+                .as_ref()
+                .map(|(ck, _)| *ck != k)
+                .unwrap_or(true);
+            if stale {
+                let rebuilt = BoardGraph::new(game.board().definition().clone())
+                    .ok()
+                    .and_then(|bd| {
+                        let upto = k.min(game.state().move_log.len());
+                        realmweave_core::Game::replay(
+                            bd,
+                            game.config().clone(),
+                            &game.state().move_log[..upto],
+                        )
+                        .ok()
+                    })
+                    .map(|g| (k, g.state().clone()));
+                *review_cache = rebuilt;
+            }
+            review_cache.as_ref().map(|(_, st)| st)
+        }
+    };
+    let state = review_state.unwrap_or_else(|| game.state());
     let def = board.definition();
     let origins: std::collections::HashMap<NodeId, Player> =
         def.origins.iter().map(|o| (o.node, o.player)).collect();
     let gates: std::collections::HashSet<NodeId> = def.gate_nodes().into_iter().collect();
-    let legal: std::collections::HashSet<NodeId> = if view.show_legal {
+    let reviewing = view.review_cursor.is_some();
+    let legal: std::collections::HashSet<NodeId> = if view.show_legal && !reviewing {
         session.0.legal_placements().into_iter().collect()
     } else {
         Default::default()
@@ -363,7 +388,11 @@ pub(crate) fn sync_board_visuals(
     } else {
         Default::default()
     };
-    let last_placed = session.0.last_placed();
+    let last_placed = if reviewing {
+        None // live last-move overlays lie on a historical board
+    } else {
+        session.0.last_placed()
+    };
     let is_triforce = game.config().ruleset_id == realmweave_core::TRIFORCE_V5;
     let tf_side = if is_triforce {
         (((8 * board.node_count() + 1) as f64).sqrt() as usize - 1) / 2
@@ -442,7 +471,11 @@ pub(crate) fn sync_board_visuals(
     // Cut edges are simply GONE — the world changed. Exception: the *freshest*
     // cut is drawn as a bright red scar so the player sees what just happened.
     let cut: std::collections::HashSet<u32> = state.cut_edges.iter().copied().collect();
-    let last_cut = session.0.last_cut();
+    let last_cut = if reviewing {
+        None
+    } else {
+        session.0.last_cut()
+    };
     for (ei, edge) in def.edges.iter().enumerate() {
         if cut.contains(&(ei as u32)) {
             if last_cut == Some(ei as u32) {
@@ -525,7 +558,7 @@ pub(crate) fn sync_board_visuals(
     }
 
     // Last-move pulse: a breathing ring around the freshest stone.
-    if let Some(last) = session.0.last_placed() {
+    if let Some(last) = last_placed {
         let p = Vec3::from_array(layout::node_position(board, last, view.mode));
         let r = 0.55 + 0.12 * (time.elapsed_secs() * 4.0).sin();
         gizmos.sphere(
@@ -545,8 +578,11 @@ pub(crate) fn sync_board_visuals(
         );
     }
 
-    // Realm layer rings for readability (3D view).
-    if view.mode == ViewMode::Stacked3D {
+    // Realm layer rings for readability (3D view) — stacked hex boards
+    // only: flat boards (triforce, trinity triangles) have no layers and
+    // the rings would float in empty space.
+    let stacked_board = def.id.starts_with("hex");
+    if view.mode == ViewMode::Stacked3D && stacked_board {
         let max_r = def
             .nodes
             .iter()

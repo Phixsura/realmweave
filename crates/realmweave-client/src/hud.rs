@@ -102,10 +102,17 @@ pub(crate) fn game_hud(
                 if s.swap_available() && ui.button("swap sides (pie)").clicked() {
                     events.send(IntentEvent(PlayerIntent::Swap));
                 }
-                if s.result().is_none()
-                    && s.game.legal_moves().contains(&Move::Pass)
-                    && ui.button("pass").clicked()
-                {
+                // Pass availability by ruleset, NOT by enumerating every
+                // legal move each frame (that scan validates all ~250
+                // placements including capture simulation).
+                let pass_allowed = matches!(
+                    s.game.config().ruleset_id.as_str(),
+                    realmweave_core::TRIFORCE_V5
+                        | realmweave_core::TRINITY_Y_V4
+                        | realmweave_core::WEAVE_SEVER_V2
+                        | realmweave_core::WEAVE_LAYERS_V3
+                );
+                if s.result().is_none() && pass_allowed && ui.button("pass").clicked() {
                     events.send(IntentEvent(PlayerIntent::Pass));
                 }
                 if s.result().is_none() && ui.button("resign").clicked() {
@@ -291,9 +298,6 @@ pub(crate) fn game_hud(
                     }
                 }
             }
-            if let Some(err) = &s.last_error {
-                ui.colored_label(egui::Color32::LIGHT_RED, err);
-            }
             let caps = s.game.state().captures;
             if caps != [0, 0] {
                 ui.label(format!("提子 白{}:黑{}", caps[0], caps[1]));
@@ -370,7 +374,17 @@ pub(crate) fn node_tooltip(session: &Session, id: NodeId) -> String {
     let board = session.game.board();
     let def = board.definition();
     let node = &def.nodes[id as usize];
-    let realm = node.realm.name();
+    let realm = if session.game.config().ruleset_id == realmweave_core::TRIFORCE_V5 {
+        let side = (((8 * board.node_count() + 1) as f64).sqrt() as usize - 1) / 2;
+        match realmweave_core::boardgen::triforce_region(side, id) {
+            0 => "Heaven",
+            1 => "Mortal",
+            2 => "Underworld",
+            _ => "Weave-Heart",
+        }
+    } else {
+        node.realm.name()
+    };
     let coord = node
         .axial
         .map(|ax| format!(" ({},{})", ax[0], ax[1]))

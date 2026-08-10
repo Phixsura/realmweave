@@ -117,7 +117,27 @@ fn set_nonblocking(ws: &mut WebSocket<MaybeTlsStream<TcpStream>>) {
 
 /// Fetch a board definition over HTTP (plain std, no async runtime).
 pub fn fetch_board(addr: &str, board_id: &str) -> Result<realmweave_core::BoardDefinition, String> {
-    let mut stream = TcpStream::connect(addr).map_err(|e| e.to_string())?;
+    // Called from frame-adjacent contexts: bound every network wait so a
+    // hung server can never freeze the client indefinitely.
+    let timeout = std::time::Duration::from_secs(3);
+    let sock_addr = addr
+        .parse()
+        .or_else(|_| {
+            use std::net::ToSocketAddrs;
+            addr.to_socket_addrs()
+                .map_err(|e| e.to_string())?
+                .next()
+                .ok_or_else(|| format!("no address for {addr}"))
+        })
+        .map_err(|e: String| e)?;
+    let stream = TcpStream::connect_timeout(&sock_addr, timeout).map_err(|e| e.to_string())?;
+    stream
+        .set_read_timeout(Some(timeout))
+        .map_err(|e| e.to_string())?;
+    stream
+        .set_write_timeout(Some(timeout))
+        .map_err(|e| e.to_string())?;
+    let mut stream = stream;
     use std::io::{Read, Write};
     let request =
         format!("GET /api/boards/{board_id} HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n\r\n");

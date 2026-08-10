@@ -66,9 +66,14 @@ pub(crate) fn net_pump(
                     };
                 }
                 ServerMessage::Snapshot(snap) => {
-                    // Authoritative rebuild of the local mirror.
+                    // Authoritative rebuild of the local mirror. Generated
+                    // board families regenerate locally — the (blocking)
+                    // HTTP fetch is only for hand-made boards.
                     let Some(server) = &server else { continue };
-                    match net::fetch_board(&server.0, &snap.config.board_id)
+                    let def = boardgen::resolve(&snap.config.board_id)
+                        .ok_or(())
+                        .or_else(|()| net::fetch_board(&server.0, &snap.config.board_id));
+                    match def
                         .and_then(|def| BoardGraph::new(def).map_err(|e| e.to_string()))
                         .and_then(|board| {
                             Game::replay(board, snap.config.clone(), &snap.moves)
