@@ -8,8 +8,20 @@ use crate::*;
 #[allow(unused_imports)]
 use realmweave_core::Move;
 
+/// Despawn board entities + related resources so the next
+/// `sync_board_visuals` respawns them for the (possibly different) board.
+fn invalidate_board(commands: &mut Commands, nodes: &Query<Entity, With<NodeMarker>>) {
+    commands.remove_resource::<BoardSpawned>();
+    commands.remove_resource::<Palette>();
+    for entity in nodes {
+        commands.entity(entity).despawn();
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn net_pump(
     mut commands: Commands,
+    nodes: Query<Entity, With<NodeMarker>>,
     mut session: ResMut<GameSession>,
     mut ui: ResMut<UiState>,
     net: Res<Net>,
@@ -63,6 +75,12 @@ pub(crate) fn net_pump(
                                 .map_err(|e| e.to_string())
                         }) {
                         Ok(game) => {
+                            // The room's real board may differ from the join
+                            // placeholder (size or family): rebuild entities.
+                            if session.game.board().definition().id != game.board().definition().id
+                            {
+                                invalidate_board(&mut commands, &nodes);
+                            }
                             session.game = game;
                             session.control = Control::Seat(snap.seat);
                             session.clock = Some(snap.clock);

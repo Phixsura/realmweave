@@ -368,6 +368,9 @@ pub(crate) fn sync_board_visuals(
 
     for (marker, mut transform, mut material, mut mesh) in &mut nodes {
         let id = marker.0;
+        if id as usize >= board.node_count() {
+            continue; // stale entity from a board swap; despawn is in flight
+        }
         let pos = layout::node_position(board, id, view.mode);
         transform.translation = Vec3::from_array(pos);
         // Shape IS the side: sphere = Light, diamond = Dark, dot = empty.

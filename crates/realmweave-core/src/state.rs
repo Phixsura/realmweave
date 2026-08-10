@@ -199,9 +199,10 @@ impl GameState {
         }
     }
 
-    /// Stone at `node`, if any.
+    /// Stone at `node`, if any. Out-of-range ids read as empty — renderers
+    /// may briefly hold stale node ids across a board swap.
     pub fn occupant(&self, node: NodeId) -> Option<Player> {
-        self.occupancy[node as usize]
+        self.occupancy.get(node as usize).copied().flatten()
     }
 
     /// Is this node petrified world structure (weave-layers-v3)?

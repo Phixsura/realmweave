@@ -325,3 +325,13 @@ fn complete_games_finish_on_all_sizes() {
         assert_eq!(replayed.result(), game.result());
     }
 }
+
+/// Renderers may briefly hold stale node ids across an online board swap;
+/// state accessors must read out-of-range as empty, never panic.
+#[test]
+fn occupant_out_of_range_is_empty() {
+    let state = realmweave_core::GameState::new("tiny", 4);
+    assert_eq!(state.occupant(3), None);
+    assert_eq!(state.occupant(4), None); // OOB
+    assert_eq!(state.occupant(u16::MAX), None);
+}
