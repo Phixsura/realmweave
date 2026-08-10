@@ -1601,9 +1601,12 @@ fn game_hud(
             if s.game.config().ruleset_id == realmweave_core::TRINITY_Y_V4 {
                 let ly = s.game.state().layers;
                 ui.label(
-                    egui::RichText::new(format!("⚖ 界域 白 {} | 黑 {} （先取两界胜）", ly[0], ly[1]))
-                        .strong()
-                        .size(16.0),
+                    egui::RichText::new(format!(
+                        "⚖ 界域 白 {} | 黑 {} （先取两界胜）",
+                        ly[0], ly[1]
+                    ))
+                    .strong()
+                    .size(16.0),
                 );
             }
             if s.game.config().ruleset_id == realmweave_core::WEAVE_LAYERS_V3 {

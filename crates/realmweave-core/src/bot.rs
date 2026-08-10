@@ -291,6 +291,44 @@ pub fn best_routes(game: &Game, player: Player) -> Vec<NodeId> {
 
 /// Static evaluation from `me`'s perspective: lower own link cost is good,
 /// higher opponent cost is good; scissors are worth keeping.
+/// Stones in atari (groups with exactly one liberty) for `player` —
+/// death-rule pressure metric (trinity boards).
+fn atari_stones(game: &Game, player: Player) -> u32 {
+    let bd = game.board();
+    let st = game.state();
+    let n = bd.node_count();
+    let mut visited = vec![false; n];
+    let mut total = 0u32;
+    for start in 0..n as NodeId {
+        if st.occupant(start) != Some(player) || visited[start as usize] {
+            continue;
+        }
+        let mut members = vec![start];
+        visited[start as usize] = true;
+        let mut queue = std::collections::VecDeque::from([start]);
+        let mut libs = std::collections::HashSet::new();
+        while let Some(cur) = queue.pop_front() {
+            for &nb in bd.neighbors(cur) {
+                match st.occupant(nb) {
+                    None => {
+                        libs.insert(nb);
+                    }
+                    Some(p) if p == player && !visited[nb as usize] => {
+                        visited[nb as usize] = true;
+                        queue.push_back(nb);
+                        members.push(nb);
+                    }
+                    _ => {}
+                }
+            }
+        }
+        if libs.len() == 1 {
+            total += members.len() as u32;
+        }
+    }
+    total
+}
+
 fn evaluate(game: &Game, me: Player) -> f64 {
     if let Some(result) = game.result() {
         return match result {
@@ -315,7 +353,15 @@ fn evaluate(game: &Game, me: Player) -> f64 {
         }] as f64;
     // Defense-weighted: protecting your own web matters more than hurting
     // theirs — aggression-first weights degenerate into strangle races.
-    theirs - 2.4 * mine + 1.2 * scissor_value + 900.0 * layer_lead
+    // Death-rule pressure (trinity): my stones in atari are near-lost,
+    // enemy ataris are near-captured. Captured stones already improved
+    // link costs; this term makes the THREAT visible one ply earlier.
+    let atari_term = if game.board().definition().origins.is_empty() {
+        2.0 * (atari_stones(game, me.opponent()) as f64 - atari_stones(game, me) as f64)
+    } else {
+        0.0
+    };
+    theirs - 2.4 * mine + 1.2 * scissor_value + 900.0 * layer_lead + atari_term
 }
 
 /// Candidate moves worth considering (keeps branching manageable):

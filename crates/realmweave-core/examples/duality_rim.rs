@@ -8,7 +8,10 @@
 use realmweave_core::{boardgen, BoardGraph, NodeId, Player, Realm};
 
 fn xorshift(x: &mut u64) -> u64 {
-    *x ^= *x << 13; *x ^= *x >> 7; *x ^= *x << 17; *x
+    *x ^= *x << 13;
+    *x ^= *x >> 7;
+    *x ^= *x << 17;
+    *x
 }
 
 /// Outer-ring nodes of a realm whose axial coords lie on the side facing
@@ -17,8 +20,12 @@ fn xorshift(x: &mut u64) -> u64 {
 fn side_nodes(board: &BoardGraph, realm: Realm, sector: usize, radius: i32) -> Vec<NodeId> {
     // corners in axial coords, order matches DIRS hexagon
     let corners = [
-        [radius, 0], [0, radius], [-radius, radius],
-        [-radius, 0], [0, -radius], [radius, -radius],
+        [radius, 0],
+        [0, radius],
+        [-radius, radius],
+        [-radius, 0],
+        [0, -radius],
+        [radius, -radius],
     ];
     let a = corners[sector % 6];
     let b = corners[(sector + 1) % 6];
@@ -34,13 +41,20 @@ fn side_nodes(board: &BoardGraph, realm: Realm, sector: usize, radius: i32) -> V
     out
 }
 
-fn connects_all_rims(board: &BoardGraph, occ: &[Option<Player>], player: Player, rims: &[Vec<NodeId>; 3]) -> bool {
+fn connects_all_rims(
+    board: &BoardGraph,
+    occ: &[Option<Player>],
+    player: Player,
+    rims: &[Vec<NodeId>; 3],
+) -> bool {
     // BFS over player's stones; must touch at least one node of each rim.
     let n = board.node_count();
     let mut visited = vec![false; n];
     let mut comp_touch = [false; 3];
     for start in 0..n as NodeId {
-        if occ[start as usize] != Some(player) || visited[start as usize] { continue; }
+        if occ[start as usize] != Some(player) || visited[start as usize] {
+            continue;
+        }
         // BFS this component
         let mut queue = std::collections::VecDeque::new();
         let mut touch = [false; 3];
@@ -58,19 +72,38 @@ fn connects_all_rims(board: &BoardGraph, occ: &[Option<Player>], player: Player,
         }
         for m in members {
             for (k, rim) in rims.iter().enumerate() {
-                if rim.contains(&m) { touch[k] = true; }
+                if rim.contains(&m) {
+                    touch[k] = true;
+                }
             }
         }
-        if touch.iter().all(|&t| t) { return true; }
-        for k in 0..3 { comp_touch[k] |= touch[k]; }
+        if touch.iter().all(|&t| t) {
+            return true;
+        }
+        for k in 0..3 {
+            comp_touch[k] |= touch[k];
+        }
     }
     false
 }
 
 fn main() {
-    let size: usize = std::env::args().nth(1).and_then(|s| s.parse().ok()).unwrap_or(37);
-    let trials: u32 = std::env::args().nth(2).and_then(|s| s.parse().ok()).unwrap_or(2000);
-    let radius = match size { 19 => 2, 37 => 3, 61 => 4, 91 => 5, 127 => 6, _ => 3 };
+    let size: usize = std::env::args()
+        .nth(1)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(37);
+    let trials: u32 = std::env::args()
+        .nth(2)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(2000);
+    let radius = match size {
+        19 => 2,
+        37 => 3,
+        61 => 4,
+        91 => 5,
+        127 => 6,
+        _ => 3,
+    };
     let def = boardgen::generate_standard(size).unwrap();
     let board = BoardGraph::new(def).unwrap();
     let n = board.node_count();
@@ -98,7 +131,11 @@ fn main() {
             ids.swap(i, j);
         }
         for (k, &i) in ids.iter().enumerate() {
-            occ[i] = Some(if k % 2 == 0 { Player::Light } else { Player::Dark });
+            occ[i] = Some(if k % 2 == 0 {
+                Player::Light
+            } else {
+                Player::Dark
+            });
         }
         let l = connects_all_rims(&board, &occ, Player::Light, &rims_l);
         let d = connects_all_rims(&board, &occ, Player::Dark, &rims_d);
@@ -111,7 +148,10 @@ fn main() {
     }
     let t = trials as f64;
     println!("hex{size} RIM goal, random fill × {trials}:");
-    println!("  exactly one: {:.1}%", 100.0 * (only_l + only_d) as f64 / t);
+    println!(
+        "  exactly one: {:.1}%",
+        100.0 * (only_l + only_d) as f64 / t
+    );
     println!("  both:        {:.1}%", 100.0 * both as f64 / t);
     println!("  neither:     {:.1}%", 100.0 * neither as f64 / t);
 }

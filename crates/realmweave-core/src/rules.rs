@@ -1081,18 +1081,23 @@ impl RuleSet for WeaveSeverV2 {
 
 // ------------------------------------------------------------- trinity-y ---
 
-/// Trinity Y (v4) — the whole rulebook:
+/// Trinity Y (v4.1) — the whole rulebook:
 ///
 ///   1. On your turn, place a stone on any empty node (or use the pie swap).
-///   2. A realm is WON by the player whose single group connects all three
-///      of that realm's sides. Y theorem: a full triangle has exactly one
-///      such player — no realm can end undecided.
-///   3. Win the match by winning TWO of the three realms.
+///   2. DEATH: a group with no empty adjacent node (no liberties) is
+///      captured and removed. Your placement captures the enemy first;
+///      a move that leaves your own group with no liberties is illegal
+///      (suicide), and recreating a previous whole-board position is
+///      illegal (positional superko) — the ko rule, exactly as in Go.
+///   3. A realm is WON by the player whose single group connects all three
+///      of that realm's sides (Y). Won realms are sealed: their stones are
+///      immortal and the realm is closed to further play.
+///   4. Win the match by winning TWO of the three realms.
 ///
-/// Nothing else. No origins, no scissors, no sanctums, no caps: the one
-/// resource is tempo (each stone played in one realm is a stone not played
-/// in the other two), and attack IS defense (blocking your opponent's Y is
-/// building your own — the Y theorem again).
+/// One goal rule (Y — attack IS defense, no dead positions by theorem),
+/// one dynamics rule (liberties — stones can die, walls need eyes, whole
+/// groups can be hunted). Everything else — eyes, ladders, ko fights,
+/// sacrifices, invasions of "finished" territory — must emerge.
 pub struct TrinityY {
     pub pie_rule: bool,
 }
@@ -1107,7 +1112,11 @@ impl TrinityY {
 
     /// Who (if anyone) has a Y in this realm: one group touching all
     /// three sides.
-    pub fn realm_winner(board: &BoardGraph, state: &GameState, realm_index: usize) -> Option<Player> {
+    pub fn realm_winner(
+        board: &BoardGraph,
+        state: &GameState,
+        realm_index: usize,
+    ) -> Option<Player> {
         let side = Self::side_of(board);
         let per_realm = board.node_count() / 3;
         let lo = (realm_index * per_realm) as NodeId;
@@ -1156,6 +1165,94 @@ impl TrinityY {
     fn swap_available(&self, state: &GameState) -> bool {
         self.pie_rule && !state.swap_used && state.ply == 1 && state.to_move == Player::Dark
     }
+
+    /// Realm index of a node.
+    fn realm_of(board: &BoardGraph, node: NodeId) -> usize {
+        node as usize / (board.node_count() / 3)
+    }
+
+    /// Is this realm already won (sealed)?
+    fn realm_sealed(board: &BoardGraph, state: &GameState, realm: usize) -> bool {
+        // layers tracks realm ownership; recompute is cheap but layers is
+        // only a count. Track sealing via winner scan (cached by caller if
+        // hot). A realm is sealed iff someone has a Y there.
+        Self::realm_winner(board, state, realm).is_some()
+    }
+
+    /// The group containing `start` and whether it has any liberty.
+    fn group_liberties(
+        board: &BoardGraph,
+        occ: &[Option<Player>],
+        start: NodeId,
+    ) -> (Vec<NodeId>, bool) {
+        let player = occ[start as usize].expect("group start occupied");
+        let mut members = vec![start];
+        let mut visited = vec![false; board.node_count()];
+        visited[start as usize] = true;
+        let mut queue = VecDeque::from([start]);
+        let mut has_liberty = false;
+        while let Some(cur) = queue.pop_front() {
+            for &nb in board.neighbors(cur) {
+                match occ[nb as usize] {
+                    None => has_liberty = true,
+                    Some(p) if p == player && !visited[nb as usize] => {
+                        visited[nb as usize] = true;
+                        queue.push_back(nb);
+                        members.push(nb);
+                    }
+                    _ => {}
+                }
+            }
+        }
+        (members, has_liberty)
+    }
+
+    /// Apply a placement with Go dynamics onto `occ`. Returns captured
+    /// count, or None if the move is suicide.
+    fn place_with_capture(
+        board: &BoardGraph,
+        occ: &mut [Option<Player>],
+        sealed: &[bool; 3],
+        node: NodeId,
+        player: Player,
+    ) -> Option<u32> {
+        occ[node as usize] = Some(player);
+        let mut captured = 0u32;
+        // enemy groups adjacent to the new stone, now libertyless, die —
+        // but stones in SEALED realms are immortal.
+        let realm = Self::realm_of(board, node);
+        if !sealed[realm] {
+            let mut checked = vec![false; board.node_count()];
+            for &nb in board.neighbors(node) {
+                if occ[nb as usize] == Some(player.opponent()) && !checked[nb as usize] {
+                    let (members, alive) = Self::group_liberties(board, occ, nb);
+                    for &m in &members {
+                        checked[m as usize] = true;
+                    }
+                    if !alive {
+                        captured += members.len() as u32;
+                        for m in members {
+                            occ[m as usize] = None;
+                        }
+                    }
+                }
+            }
+        }
+        // suicide check
+        let (_, alive) = Self::group_liberties(board, occ, node);
+        if !alive {
+            return None; // caller restores occ
+        }
+        Some(captured)
+    }
+
+    fn sealed_realms(board: &BoardGraph, state: &GameState) -> [bool; 3] {
+        [
+            Self::realm_sealed(board, state, 0),
+            Self::realm_sealed(board, state, 1),
+            Self::realm_sealed(board, state, 2),
+        ]
+    }
 }
 
 impl RuleSet for TrinityY {
@@ -1170,9 +1267,13 @@ impl RuleSet for TrinityY {
             return Vec::new();
         }
         let mut moves: Vec<Move> = (0..board.node_count() as NodeId)
-            .filter(|&n| state.occupant(n).is_none())
+            .filter(|&n| {
+                state.occupant(n).is_none()
+                    && self.validate_move(board, state, &Move::Place(n)).is_ok()
+            })
             .map(Move::Place)
             .collect();
+        moves.push(Move::Pass);
         if self.swap_available(state) {
             moves.push(Move::Swap);
         }
@@ -1197,6 +1298,23 @@ impl RuleSet for TrinityY {
                 if state.occupant(*node).is_some() {
                     return Err(RuleError::Occupied(*node));
                 }
+                let sealed = Self::sealed_realms(board, state);
+                if sealed[Self::realm_of(board, *node)] {
+                    return Err(RuleError::Occupied(*node)); // sealed realm is closed
+                }
+                // Go dynamics: suicide + positional superko.
+                let mut occ = state.occupancy.clone();
+                if Self::place_with_capture(board, &mut occ, &sealed, *node, state.to_move)
+                    .is_none()
+                {
+                    return Err(RuleError::SuicideMove(*node));
+                }
+                let mut sim = state.clone();
+                sim.occupancy = occ;
+                let hash = position_hash(&sim);
+                if state.position_hashes.contains(&hash) {
+                    return Err(RuleError::KoViolation(*node));
+                }
                 Ok(())
             }
             Move::Swap => {
@@ -1207,7 +1325,7 @@ impl RuleSet for TrinityY {
                 }
             }
             Move::Resign => Ok(()),
-            Move::Pass => Err(RuleError::PassUnavailable),
+            Move::Pass => Ok(()),
             Move::CutEdge(e) => Err(RuleError::CannotCut(*e)),
             Move::Sever(n) => Err(RuleError::CannotSever(*n)),
         }
@@ -1236,8 +1354,35 @@ impl RuleSet for TrinityY {
                 return Ok(next);
             }
             Move::Swap => return Ok(next),
+            Move::Pass => {
+                next.consecutive_passes += 1;
+                if next.consecutive_passes >= 2 {
+                    // Both stop: realms won decide; tie = draw.
+                    let scores = Self::realm_scores(board, &next);
+                    next.result = Some(match scores[0].cmp(&scores[1]) {
+                        std::cmp::Ordering::Greater => GameResult::Win {
+                            player: Player::Light,
+                            reason: WinReason::RealmWeave,
+                        },
+                        std::cmp::Ordering::Less => GameResult::Win {
+                            player: Player::Dark,
+                            reason: WinReason::RealmWeave,
+                        },
+                        std::cmp::Ordering::Equal => GameResult::Draw,
+                    });
+                    return Ok(next);
+                }
+                next.to_move = mover.opponent();
+                return Ok(next);
+            }
             Move::Place(node) => {
-                next.occupancy[*node as usize] = Some(mover);
+                let sealed = Self::sealed_realms(board, state);
+                let captured =
+                    Self::place_with_capture(board, &mut next.occupancy, &sealed, *node, mover)
+                        .expect("validated: not suicide");
+                next.captures[player_index(mover)] += captured;
+                next.consecutive_passes = 0;
+                next.position_hashes.push(position_hash(&next));
             }
             _ => unreachable!("validated"),
         }

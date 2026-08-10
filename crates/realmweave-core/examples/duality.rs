@@ -12,8 +12,14 @@ fn xorshift(x: &mut u64) -> u64 {
 }
 
 fn main() {
-    let size: usize = std::env::args().nth(1).and_then(|s| s.parse().ok()).unwrap_or(37);
-    let trials: u32 = std::env::args().nth(2).and_then(|s| s.parse().ok()).unwrap_or(2000);
+    let size: usize = std::env::args()
+        .nth(1)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(37);
+    let trials: u32 = std::env::args()
+        .nth(2)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(2000);
     let def = boardgen::generate_standard(size).unwrap();
     let board = BoardGraph::new(def).unwrap();
     let n = board.node_count();
@@ -32,10 +38,18 @@ fn main() {
             ids.swap(i, j);
         }
         for (k, &i) in ids.iter().enumerate() {
-            st.occupancy[i] = Some(if k % 2 == 0 { Player::Light } else { Player::Dark });
+            st.occupancy[i] = Some(if k % 2 == 0 {
+                Player::Light
+            } else {
+                Player::Dark
+            });
         }
-        for &o in &origins_l { st.occupancy[o as usize] = Some(Player::Light); }
-        for &o in &origins_d { st.occupancy[o as usize] = Some(Player::Dark); }
+        for &o in &origins_l {
+            st.occupancy[o as usize] = Some(Player::Light);
+        }
+        for &o in &origins_d {
+            st.occupancy[o as usize] = Some(Player::Dark);
+        }
         let l = live_realm_weave(&board, &st, Player::Light);
         let d = live_realm_weave(&board, &st, Player::Dark);
         match (l, d) {
@@ -47,8 +61,18 @@ fn main() {
     }
     let t = trials as f64;
     println!("hex{size} full-board random fill × {trials}:");
-    println!("  exactly one weaves: {:.1}%  (Hex would be 100%)", 100.0 * (only_l + only_d) as f64 / t);
+    println!(
+        "  exactly one weaves: {:.1}%  (Hex would be 100%)",
+        100.0 * (only_l + only_d) as f64 / t
+    );
     println!("  both weave:         {:.1}%", 100.0 * both as f64 / t);
-    println!("  NEITHER weaves:     {:.1}%  <- deadness: blocking exceeds building", 100.0 * neither as f64 / t);
-    println!("  (L {:.1}% / D {:.1}%)", 100.0 * only_l as f64 / t, 100.0 * only_d as f64 / t);
+    println!(
+        "  NEITHER weaves:     {:.1}%  <- deadness: blocking exceeds building",
+        100.0 * neither as f64 / t
+    );
+    println!(
+        "  (L {:.1}% / D {:.1}%)",
+        100.0 * only_l as f64 / t,
+        100.0 * only_d as f64 / t
+    );
 }
