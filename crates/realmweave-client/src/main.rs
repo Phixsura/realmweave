@@ -187,7 +187,7 @@ impl Default for UiState {
         UiState {
             board_size: 91,
             pie_rule: false,
-            ruleset: realmweave_core::WEAVE_LAYERS_V3.to_string(),
+            ruleset: realmweave_core::TRINITY_Y_V4.to_string(),
             world_seed: 0,
             server_addr: "127.0.0.1:8420".to_string(),
             room_code: String::new(),

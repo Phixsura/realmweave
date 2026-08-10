@@ -58,11 +58,24 @@ pub fn load_boards(dir: &str) -> HashMap<String, BoardDefinition> {
 /// Build the axum application router.
 pub fn build_app(state: Shared) -> Router {
     Router::new()
-        .route("/healthz", get(|| async { "ok" }))
+        .route("/healthz", get(healthz))
         .route("/api/boards/{id}", get(get_board))
         .route("/api/games/{id}/record", get(get_record))
         .route("/ws", get(ws_upgrade))
         .with_state(state)
+}
+
+/// Liveness + basic operational stats (rooms open, boards loaded).
+async fn healthz(State(state): State<Shared>) -> impl IntoResponse {
+    let rooms = state.rooms.lock().await.len();
+    (
+        axum::http::StatusCode::OK,
+        format!(
+            "{{\"status\":\"ok\",\"rooms\":{rooms},\"boards\":{},\"version\":\"{}\"}}",
+            state.boards.len(),
+            env!("CARGO_PKG_VERSION"),
+        ),
+    )
 }
 
 async fn get_board(State(state): State<Shared>, Path(id): Path<String>) -> impl IntoResponse {
@@ -214,6 +227,7 @@ async fn handle_message(
             let _ = tx.send(ServerMessage::Pong);
         }
         ClientMessage::CreateRoom { config } => {
+            tracing::info!(ruleset = %config.ruleset_id, board = %config.board_id, "room create requested");
             if session.is_some() {
                 let _ = tx.send(ServerMessage::Error {
                     reason: "already seated".into(),
@@ -276,6 +290,7 @@ async fn handle_message(
             });
         }
         ClientMessage::JoinRoom { room_id } => {
+            tracing::info!(room = %room_id, "join requested");
             if session.is_some() {
                 let _ = tx.send(ServerMessage::Error {
                     reason: "already seated".into(),
@@ -325,6 +340,7 @@ async fn handle_message(
             });
         }
         ClientMessage::Reconnect { room_id, token } => {
+            tracing::info!(room = %room_id, "reconnect requested");
             if session.is_some() {
                 let _ = tx.send(ServerMessage::Error {
                     reason: "already seated".into(),

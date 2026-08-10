@@ -42,6 +42,9 @@ pub(crate) fn menu_ui(
                     ui.selectable_value(&mut ui_state.board_size, size, format!("{size} × 3"));
                 }
             });
+            if ui_state.ruleset == realmweave_core::TRINITY_Y_V4 {
+                ui.small("（三界Y使用固定的三角棋盘，此行选择不生效）");
+            }
             ui.checkbox(&mut ui_state.pie_rule, "pie rule (second player may swap)");
             ui.horizontal(|ui| {
                 ui.label("rules");
@@ -72,28 +75,31 @@ pub(crate) fn menu_ui(
             }
 
             ui.heading("Local");
-            ui.horizontal(|ui| {
-                ui.label("world seed (0=classic)");
-                let mut seed_str = ui_state.world_seed.to_string();
-                if ui.text_edit_singleline(&mut seed_str).changed() {
-                    if let Ok(v) = seed_str.parse::<u64>() {
-                        ui_state.world_seed = v;
+            let seeded_boards = ui_state.ruleset != realmweave_core::TRINITY_Y_V4;
+            if seeded_boards {
+                ui.horizontal(|ui| {
+                    ui.label("world seed (0=classic)");
+                    let mut seed_str = ui_state.world_seed.to_string();
+                    if ui.text_edit_singleline(&mut seed_str).changed() {
+                        if let Ok(v) = seed_str.parse::<u64>() {
+                            ui_state.world_seed = v;
+                        }
                     }
+                    if ui.button("🎲").clicked() {
+                        // deterministic-ish scramble from the previous value
+                        ui_state.world_seed = ui_state
+                            .world_seed
+                            .wrapping_mul(6364136223846793005)
+                            .wrapping_add(1442695040888963407)
+                            % 100000;
+                    }
+                });
+                if ui_state.world_seed != 0 {
+                    ui.colored_label(
+                        egui::Color32::YELLOW,
+                        "实验：种子世界会挖孔变形，目前偏向绞杀速胜",
+                    );
                 }
-                if ui.button("🎲").clicked() {
-                    // deterministic-ish scramble from the previous value
-                    ui_state.world_seed = ui_state
-                        .world_seed
-                        .wrapping_mul(6364136223846793005)
-                        .wrapping_add(1442695040888963407)
-                        % 100000;
-                }
-            });
-            if ui_state.world_seed != 0 {
-                ui.colored_label(
-                    egui::Color32::YELLOW,
-                    "实验：种子世界会挖孔变形，目前偏向绞杀速胜",
-                );
             }
             ui.horizontal(|ui| {
                 if ui.button("双人热座").clicked() {
@@ -131,9 +137,15 @@ pub(crate) fn menu_ui(
                     ui.label("(此规则暂无 AI)");
                 }
             });
-            ui.small(
-                "玩法：连接你的三个起源=编织胜 · Tab 切剪线模式(✂×3) · 永久隔离对方起源=绞杀胜",
-            );
+            ui.small(match ui_state.ruleset.as_str() {
+                realmweave_core::TRINITY_Y_V4 => {
+                    "玩法：一条链触到界域三边=织成该界 · 先取两界胜 · 无气之链被提"
+                }
+                realmweave_core::WEAVE_LAYERS_V3 => {
+                    "玩法：连三起源得一层并固化 · 先满3层胜 · Tab剪线 · 化石是对手的路"
+                }
+                _ => "玩法：连接你的三个起源=编织胜 · Tab 切剪线模式(✂×3) · 隔离对方=绞杀胜",
+            });
             if realmweave_bot::supports(&ui_state.ruleset)
                 && ui
                     .button("🤖 AI 对弈演示 (慢速讲解 3 局)")

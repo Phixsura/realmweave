@@ -6,6 +6,33 @@
 //!
 //! > The world is a graph; strategy emerges from how players weave and sever
 //! > paths through it.
+//!
+//! # Quick start
+//!
+//! ```
+//! use realmweave_core::{boardgen, BoardGraph, Game, GameConfig, Move, TRINITY_Y_V4};
+//!
+//! // A trinity board: three triangular realms, side length 7.
+//! let def = boardgen::generate_trinity(7).expect("supported size");
+//! let board = BoardGraph::new(def).expect("valid board");
+//! let config = GameConfig::new(board.definition().id.clone()).with_ruleset(TRINITY_Y_V4);
+//! let mut game = Game::new(board, config).expect("game starts");
+//!
+//! // Play the first legal placement.
+//! let mv = game
+//!     .legal_moves()
+//!     .into_iter()
+//!     .find(|m| matches!(m, Move::Place(_)))
+//!     .expect("placements available");
+//! game.play(mv).expect("legal moves apply");
+//!
+//! // Determinism: config + move log reproduces the exact state.
+//! let def = boardgen::generate_trinity(7).expect("supported size");
+//! let board = realmweave_core::BoardGraph::new(def).expect("valid board");
+//! let replay = Game::replay(board, game.config().clone(), &game.state().move_log)
+//!     .expect("records replay");
+//! assert_eq!(replay.state(), game.state());
+//! ```
 
 pub mod board;
 pub mod boardgen;
