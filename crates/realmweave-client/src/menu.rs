@@ -102,6 +102,12 @@ pub(crate) fn menu_ui(
                 }
             }
             ui.horizontal(|ui| {
+                ui.label("AI 强度");
+                for level in [AiLevel::Casual, AiLevel::Standard, AiLevel::Strong] {
+                    ui.selectable_value(&mut ui_state.ai_level, level, level.label());
+                }
+            });
+            ui.horizontal(|ui| {
                 if ui.button("双人热座").clicked() {
                     start_hotseat(
                         &mut commands,
@@ -114,6 +120,7 @@ pub(crate) fn menu_ui(
                 }
                 if realmweave_bot::supports(&ui_state.ruleset) {
                     if ui.button("人机对战 (你执白先手)").clicked() {
+                        commands.insert_resource(AiBudget(ui_state.ai_level.playouts()));
                         start_hotseat(
                             &mut commands,
                             ui_state.board_size,
@@ -124,6 +131,7 @@ pub(crate) fn menu_ui(
                         );
                     }
                     if ui.button("人机 (你执黑后手)").clicked() {
+                        commands.insert_resource(AiBudget(ui_state.ai_level.playouts()));
                         start_hotseat(
                             &mut commands,
                             ui_state.board_size,
@@ -273,6 +281,7 @@ pub(crate) fn start_hotseat(
     if let Some(human) = human_vs_bot {
         session.control = Control::VsBot(human);
     }
+    // note: AiBudget is set by the caller (menu) before this runs
     commands.insert_resource(GameSession(session));
     commands.insert_resource(Net(None));
     commands.insert_resource(Active);

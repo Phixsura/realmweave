@@ -65,6 +65,8 @@ fn main() {
         .add_plugins(steam::SteamPlugin)
         .add_plugins(maybe_supplywar_plugin())
         .init_resource::<UiState>()
+        .init_resource::<AiBudget>()
+        .init_resource::<LocalClocks>()
         .init_resource::<ViewSettings>()
         .add_event::<IntentEvent>()
         .add_systems(Startup, (setup_camera, setup_cjk_font))
@@ -84,6 +86,7 @@ fn main() {
                     apply_replay_cursor,
                     sync_board_visuals,
                     orbit_camera,
+                    tick_local_clocks,
                     game_hud,
                     game_over_panel,
                     history_panel,
@@ -95,6 +98,28 @@ fn main() {
             ),
         )
         .run();
+}
+
+/// Accumulate thinking time for the side to move (local live games only).
+fn tick_local_clocks(
+    time: Res<Time>,
+    mut clocks: ResMut<LocalClocks>,
+    session: Option<Res<GameSession>>,
+) {
+    let Some(session) = session else { return };
+    let s = &session.0;
+    let ply = s.game.state().ply;
+    if ply < clocks.last_ply {
+        *clocks = LocalClocks::default(); // new game (rematch/undo past zero)
+    }
+    clocks.last_ply = ply;
+    if s.result().is_some() || !matches!(s.connection, session::Connection::Local) {
+        return;
+    }
+    match s.game.to_move() {
+        Player::Light => clocks.light_s += time.delta_secs(),
+        Player::Dark => clocks.dark_s += time.delta_secs(),
+    }
 }
 
 // ---------------------------------------------------------------- resources
@@ -178,12 +203,60 @@ impl Default for ViewSettings {
 #[derive(Event)]
 struct IntentEvent(PlayerIntent);
 
+/// Local per-side elapsed thinking time (seconds), for the HUD.
+#[derive(Resource, Default)]
+struct LocalClocks {
+    light_s: f32,
+    dark_s: f32,
+    last_ply: u32,
+}
+
+/// Active game's AI playout budget (set from the menu at game start).
+#[derive(Resource, Clone, Copy)]
+struct AiBudget(u32);
+
+impl Default for AiBudget {
+    fn default() -> Self {
+        AiBudget(3000)
+    }
+}
+
+/// AI strength presets (MCTS playout budgets).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum AiLevel {
+    /// ~800 playouts: quick, beatable.
+    Casual,
+    /// ~3000 playouts: the default.
+    Standard,
+    /// ~8000 playouts: slow and mean.
+    Strong,
+}
+
+impl AiLevel {
+    fn playouts(self) -> u32 {
+        match self {
+            AiLevel::Casual => 800,
+            AiLevel::Standard => 3000,
+            AiLevel::Strong => 8000,
+        }
+    }
+    fn label(self) -> &'static str {
+        match self {
+            AiLevel::Casual => "轻松",
+            AiLevel::Standard => "标准",
+            AiLevel::Strong => "困难",
+        }
+    }
+}
+
 /// Menu inputs.
 #[derive(Resource)]
 struct UiState {
     board_size: usize,
     pie_rule: bool,
     ruleset: String,
+    /// MCTS playout budget for vs-AI games.
+    ai_level: AiLevel,
     /// 0 = classic fixed board; otherwise a seeded random world.
     world_seed: u64,
     server_addr: String,
@@ -199,6 +272,7 @@ impl Default for UiState {
                 board_size: p.board_size,
                 pie_rule: p.pie_rule,
                 ruleset: p.ruleset,
+                ai_level: AiLevel::Standard,
                 world_seed: 0,
                 server_addr: p.server_addr,
                 room_code: String::new(),
@@ -209,6 +283,7 @@ impl Default for UiState {
         UiState {
             board_size: 91,
             pie_rule: false,
+            ai_level: AiLevel::Standard,
             ruleset: realmweave_core::TRINITY_Y_V4.to_string(),
             world_seed: 0,
             server_addr: "127.0.0.1:8420".to_string(),

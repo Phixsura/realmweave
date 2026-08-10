@@ -24,6 +24,7 @@ pub(crate) fn bot_turn(
     mut session: ResMut<GameSession>,
     mut task: Local<BotTask>,
     tut: Option<Res<Tutorial>>,
+    budget: Res<AiBudget>,
 ) {
     let s = &mut session.0;
     let Control::VsBot(human) = s.control else {
@@ -95,8 +96,13 @@ pub(crate) fn bot_turn(
     )
     .expect("live game replays");
     task.0 = Some((s.game.state().ply, rx));
+    let playouts = budget.0;
     std::thread::spawn(move || {
-        let mv = realmweave_bot::choose_move(&game_copy, seed);
+        let mv = realmweave_bot::choose_move_with_budget(
+            &game_copy,
+            seed,
+            realmweave_bot::mcts::MctsConfig { playouts, c: 0.9 },
+        );
         let _ = tx.send(mv);
     });
 }

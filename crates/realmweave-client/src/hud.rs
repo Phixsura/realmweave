@@ -20,6 +20,7 @@ pub(crate) fn game_hud(
     net: Res<Net>,
     mut replay: Option<ResMut<Replay>>,
     nodes: Query<Entity, With<NodeMarker>>,
+    clocks: Res<LocalClocks>,
 ) {
     let ctx = egui_ctx.ctx_mut();
     let s = &session.0;
@@ -186,6 +187,17 @@ pub(crate) fn game_hud(
                         ui.colored_label(egui::Color32::LIGHT_RED, "⚠ 黑方起源已被割裂！");
                     }
                 }
+            }
+            if matches!(s.connection, Connection::Local)
+                && !matches!(s.control, Control::Observer | Control::BotDuel)
+            {
+                ui.separator();
+                let f = |secs: f32| format!("{}:{:02}", secs as u32 / 60, secs as u32 % 60);
+                ui.label(format!(
+                    "⏱ 白 {} | 黑 {}",
+                    f(clocks.light_s),
+                    f(clocks.dark_s)
+                ));
             }
             if let Some(text) = s.last_move_text() {
                 ui.separator();

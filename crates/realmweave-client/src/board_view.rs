@@ -174,6 +174,7 @@ pub(crate) fn sync_board_visuals(
     view: Res<ViewSettings>,
     tut: Option<Res<Tutorial>>,
     time: Res<Time>,
+    mut anim: Local<(u32, f32)>, // (ply we saw last, seconds since it changed)
     spawned: Option<Res<BoardSpawned>>,
     palette: Option<Res<Palette>>,
     shapes_res: Option<Res<Shapes>>,
@@ -324,6 +325,17 @@ pub(crate) fn sync_board_visuals(
         Default::default()
     };
     let last_placed = session.0.last_placed();
+    // Placement pop animation: 0 → full scale over 0.25s after each move.
+    let ply = game.state().ply;
+    if anim.0 != ply {
+        *anim = (ply, 0.0);
+    } else {
+        anim.1 += time.delta_secs();
+    }
+    let pop = (anim.1 / 0.25).min(1.0);
+    // ease-out-back: overshoot slightly then settle
+    let pop = 1.0 + 1.7 * (pop - 1.0).powi(3) + 0.7 * (pop - 1.0).powi(2) * (pop - 1.0).abs();
+    let pop = pop.clamp(0.05, 1.15);
 
     for (marker, mut transform, mut material, mut mesh) in &mut nodes {
         let id = marker.0;
@@ -340,6 +352,11 @@ pub(crate) fn sync_board_visuals(
         if mesh.0 != *target_mesh {
             mesh.0 = target_mesh.clone();
         }
+        let scale = if last_placed == Some(id) && view.review_cursor.is_none() {
+            scale * pop
+        } else {
+            scale
+        };
         transform.scale = Vec3::splat(scale);
         let handle = match (state.occupant(id), origins.get(&id)) {
             _ if state.petrified_by(id) == Some(Player::Light) => &palette.petrified_light,
