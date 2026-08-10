@@ -28,15 +28,11 @@ use menu::*;
 use netsync::*;
 use replay_ui::*;
 
-use bevy::input::mouse::{MouseMotion, MouseWheel};
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts, EguiPlugin};
 use layout::ViewMode;
-use net::{NetEvent, NetHandle};
-use realmweave_core::{
-    boardgen, BoardGraph, EdgeKind, Game, GameResult, NodeId, Player, Realm, WinReason,
-};
-use realmweave_protocol::{ClientMessage, ServerMessage};
+use net::NetHandle;
+use realmweave_core::{NodeId, Player};
 use session::{Connection, Control, PlayerIntent, Session};
 
 #[cfg(feature = "supplywar-lab")]

@@ -3,10 +3,13 @@
 
 use bevy::prelude::*;
 
-#[allow(unused_imports)]
-use crate::*;
-#[allow(unused_imports)]
-use realmweave_core::Move;
+use crate::net::{self, NetEvent};
+use crate::{hud::try_reconnect, Control, Net};
+use crate::{
+    Active, BoardSpawned, Connection, GameSession, NodeMarker, Palette, ServerAddr, UiState,
+};
+use realmweave_core::{boardgen, BoardGraph, Game, Move};
+use realmweave_protocol::ServerMessage;
 
 /// Despawn board entities + related resources so the next
 /// `sync_board_visuals` respawns them for the (possibly different) board.

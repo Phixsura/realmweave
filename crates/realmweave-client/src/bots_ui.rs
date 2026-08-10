@@ -4,10 +4,9 @@
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 
-#[allow(unused_imports)]
-use crate::*;
-#[allow(unused_imports)]
-use realmweave_core::Move;
+use crate::session::{Control, Session};
+use crate::{tutorial, AiBudget, Duel, GameSession, Tutorial};
+use realmweave_core::{boardgen, BoardGraph, Game, GameResult, Move, NodeId, Player, WinReason};
 
 /// Bot turn driver: when control is VsBot and it's the bot's color to move,
 /// compute a move (blocking is fine at this bot's speed: <1s typical) after

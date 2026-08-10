@@ -3,10 +3,7 @@
 
 use bevy::prelude::*;
 
-#[allow(unused_imports)]
-use crate::*;
-#[allow(unused_imports)]
-use realmweave_core::Move;
+use crate::{GameSession, Replay, UiState};
 
 /// Demo auto-play: advance the replay cursor on a timer.
 pub(crate) fn replay_autoplay(time: Res<Time>, replay: Option<ResMut<Replay>>) {

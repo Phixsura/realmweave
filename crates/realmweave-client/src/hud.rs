@@ -4,10 +4,15 @@
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 
-#[allow(unused_imports)]
-use crate::*;
-#[allow(unused_imports)]
-use realmweave_core::Move;
+use crate::layout::ViewMode;
+use crate::net;
+use crate::session::{Connection, Control, PlayerIntent, Session};
+use crate::{
+    tutorial, Active, BoardSpawned, Duel, GameSession, IntentEvent, LocalClocks, Net, NodeMarker,
+    Palette, Replay, Tutorial, UiState, ViewSettings,
+};
+use realmweave_core::{BoardGraph, GameResult, NodeId, Player, WinReason};
+use realmweave_protocol::ClientMessage;
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn game_hud(
@@ -238,18 +243,7 @@ pub(crate) fn game_hud(
                 ui.colored_label(egui::Color32::LIGHT_RED, format!("✕ {err}"));
             }
             if ui.button("leave").clicked() {
-                commands.remove_resource::<Tutorial>();
-                commands.remove_resource::<Duel>();
-                commands.remove_resource::<Active>();
-                commands.remove_resource::<GameSession>();
-                commands.remove_resource::<Net>();
-                commands.remove_resource::<BoardSpawned>();
-                commands.remove_resource::<Palette>();
-                commands.remove_resource::<Replay>();
-                for entity in &nodes {
-                    commands.entity(entity).despawn();
-                }
-                ui_state.status.clear();
+                leave_session(&mut commands, &nodes, &mut ui_state);
             }
         });
         // Second row: connection status / errors.
@@ -464,18 +458,7 @@ pub(crate) fn tutorial_panel(
             if let Some(label) = button {
                 if ui.button(egui::RichText::new(label).strong()).clicked() {
                     if tut.0.step == tutorial::Step::Done {
-                        // back to menu: same cleanup as the leave button
-                        commands.remove_resource::<Tutorial>();
-                        commands.remove_resource::<Active>();
-                        commands.remove_resource::<GameSession>();
-                        commands.remove_resource::<Net>();
-                        commands.remove_resource::<BoardSpawned>();
-                        commands.remove_resource::<Palette>();
-                        commands.remove_resource::<Replay>();
-                        for entity in &nodes {
-                            commands.entity(entity).despawn();
-                        }
-                        ui_state.status.clear();
+                        leave_session(&mut commands, &nodes, &mut ui_state);
                     } else {
                         tut.0.next_button();
                     }
@@ -603,16 +586,7 @@ pub(crate) fn game_over_panel(
                     session.0 = next;
                 }
                 if ui.button("返回菜单").clicked() {
-                    commands.remove_resource::<Active>();
-                    commands.remove_resource::<GameSession>();
-                    commands.remove_resource::<Net>();
-                    commands.remove_resource::<BoardSpawned>();
-                    commands.remove_resource::<Palette>();
-                    commands.remove_resource::<Replay>();
-                    for entity in &nodes {
-                        commands.entity(entity).despawn();
-                    }
-                    ui_state.status.clear();
+                    leave_session(&mut commands, &nodes, &mut ui_state);
                 }
             });
             if !ui_state.status.is_empty() {
@@ -673,4 +647,27 @@ pub(crate) fn history_panel(
                 ui.small("点击任意一手进入复盘");
             }
         });
+}
+
+/// Tear down the active session completely and return to the menu. The ONE
+/// place that knows every session-scoped resource; all "back to menu"
+/// buttons go through here (a missed resource here once left a stale
+/// Tutorial panel alive across games).
+pub(crate) fn leave_session(
+    commands: &mut Commands,
+    nodes: &Query<Entity, With<NodeMarker>>,
+    ui_state: &mut UiState,
+) {
+    commands.remove_resource::<Tutorial>();
+    commands.remove_resource::<Duel>();
+    commands.remove_resource::<Active>();
+    commands.remove_resource::<GameSession>();
+    commands.remove_resource::<Net>();
+    commands.remove_resource::<BoardSpawned>();
+    commands.remove_resource::<Palette>();
+    commands.remove_resource::<Replay>();
+    for entity in nodes {
+        commands.entity(entity).despawn();
+    }
+    ui_state.status.clear();
 }

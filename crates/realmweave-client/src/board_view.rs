@@ -3,10 +3,20 @@
 
 use bevy::prelude::*;
 
-#[allow(unused_imports)]
-use crate::*;
-#[allow(unused_imports)]
-use realmweave_core::Move;
+use bevy::input::mouse::{MouseMotion, MouseWheel};
+use bevy_egui::EguiContexts;
+
+#[cfg(feature = "supplywar-lab")]
+use crate::supplywar_ui;
+
+use crate::layout::{self, ViewMode};
+use crate::session::{Connection, Control, PlayerIntent, Session};
+use crate::{
+    Active, BoardSpawned, Duel, GameSession, IntentEvent, Net, NodeMarker, OrbitCamera, Palette,
+    Shapes, Tutorial, ViewSettings,
+};
+use realmweave_core::{boardgen, BoardGraph, EdgeKind, NodeId, Player, Realm};
+use realmweave_protocol::ClientMessage;
 
 pub(crate) fn setup_camera(mut commands: Commands) {
     // RW_AUTOSTART=supplywar[:demo] launches straight into Supply War
