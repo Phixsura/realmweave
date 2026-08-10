@@ -158,8 +158,7 @@ fn render_triforce(game: &Game) -> String {
     let board = game.board();
     let def = board.definition();
     let state = game.state();
-    let n = def.nodes.len();
-    let side = (((8 * n + 1) as f64).sqrt() as usize - 1) / 2;
+    let side = realmweave_core::boardgen::tf_side_len(def);
     let index = board.axial_index();
     let mut out = String::new();
     for r in 0..side {
@@ -175,9 +174,9 @@ fn render_triforce(game: &Game) -> String {
                     Some(Player::Light) => 'L',
                     Some(Player::Dark) => 'D',
                     None => {
-                        if realmweave_core::boardgen::triforce_sides(side, id) != 0 {
+                        if realmweave_core::boardgen::triforce_sides(def, side, id) != 0 {
                             '·'
-                        } else if realmweave_core::boardgen::triforce_region(side, id) == 3 {
+                        } else if realmweave_core::boardgen::triforce_region(def, side, id) == 3 {
                             ','
                         } else {
                             '.'

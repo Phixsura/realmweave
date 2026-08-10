@@ -255,6 +255,9 @@ struct UiState {
     ruleset: String,
     /// MCTS playout budget for vs-AI games.
     ai_level: AiLevel,
+    /// Triforce only: use the pierced (v5p) board — six heart nodes
+    /// removed to dilute center dominance. Session-local, not persisted.
+    pierced_heart: bool,
     /// 0 = classic fixed board; otherwise a seeded random world.
     world_seed: u64,
     server_addr: String,
@@ -278,6 +281,7 @@ impl Default for UiState {
                 pie_rule: p.pie_rule,
                 ruleset,
                 ai_level: AiLevel::Standard,
+                pierced_heart: false,
                 world_seed: 0,
                 server_addr: p.server_addr,
                 room_code: String::new(),
@@ -290,6 +294,7 @@ impl Default for UiState {
             pie_rule: false,
             ai_level: AiLevel::Standard,
             ruleset: realmweave_core::TRIFORCE_V5.to_string(),
+            pierced_heart: false,
             world_seed: 0,
             server_addr: "127.0.0.1:8420".to_string(),
             room_code: String::new(),

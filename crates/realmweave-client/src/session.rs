@@ -129,12 +129,12 @@ impl Session {
         };
         let bd = self.game.board();
         let is_triforce = self.game.config().ruleset_id == realmweave_core::rules::TRIFORCE_V5;
-        let tf_side = (((8 * bd.node_count() + 1) as f64).sqrt() as usize - 1) / 2;
+        let tf_side = realmweave_core::boardgen::tf_side_len(bd.definition());
         let describe_node = |n: NodeId| -> String {
             let node = &bd.definition().nodes[n as usize];
             let ax = node.axial.unwrap_or([0, 0]);
             let region = if is_triforce {
-                match realmweave_core::boardgen::triforce_region(tf_side, n) {
+                match realmweave_core::boardgen::triforce_region(bd.definition(), tf_side, n) {
                     0 => "天",
                     1 => "人",
                     2 => "冥",

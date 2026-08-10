@@ -402,7 +402,7 @@ pub(crate) fn sync_board_visuals(
     };
     let is_triforce = game.config().ruleset_id == realmweave_core::TRIFORCE_V5;
     let tf_side = if is_triforce {
-        (((8 * board.node_count() + 1) as f64).sqrt() as usize - 1) / 2
+        realmweave_core::boardgen::tf_side_len(board.definition())
     } else {
         0
     };
@@ -459,7 +459,7 @@ pub(crate) fn sync_board_visuals(
             (None, _) if legal.contains(&id) => &palette.legal,
             (None, _) if is_triforce => {
                 let side = tf_side;
-                match realmweave_core::boardgen::triforce_region(side, id) {
+                match realmweave_core::boardgen::triforce_region(board.definition(), side, id) {
                     0 => &palette.empty_heaven,
                     1 => &palette.empty_mortal,
                     2 => &palette.empty_underworld,

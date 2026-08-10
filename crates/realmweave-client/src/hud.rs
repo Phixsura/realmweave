@@ -357,8 +357,8 @@ pub(crate) fn node_tooltip(session: &Session, id: NodeId) -> String {
     let def = board.definition();
     let node = &def.nodes[id as usize];
     let realm = if session.game.config().ruleset_id == realmweave_core::TRIFORCE_V5 {
-        let side = (((8 * board.node_count() + 1) as f64).sqrt() as usize - 1) / 2;
-        match realmweave_core::boardgen::triforce_region(side, id) {
+        let side = realmweave_core::boardgen::tf_side_len(def);
+        match realmweave_core::boardgen::triforce_region(def, side, id) {
             0 => "Heaven",
             1 => "Mortal",
             2 => "Underworld",
@@ -540,12 +540,14 @@ pub(crate) fn game_over_panel(
                     let bd = session.0.game.board();
                     let st = session.0.game.state();
                     let n = bd.node_count();
-                    let side = (((8 * n + 1) as f64).sqrt() as usize - 1) / 2;
+                    let side = realmweave_core::boardgen::tf_side_len(bd.definition());
                     let mut counts = [0u32; 4];
                     for id in 0..n as realmweave_core::NodeId {
-                        if st.occupant(id) == Some(player) {
-                            counts[realmweave_core::boardgen::triforce_region(side, id)] += 1;
-                        }
+                        counts[realmweave_core::boardgen::triforce_region(
+                            bd.definition(),
+                            side,
+                            id,
+                        )] += (st.occupant(id) == Some(player)) as u32;
                     }
                     ui.label(format!(
                         "胜方布阵：天{} 人{} 冥{} 织心{}",
