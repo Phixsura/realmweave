@@ -110,11 +110,19 @@ impl Session {
 
     /// Human-readable description of the last move (for the HUD banner).
     pub fn last_move_text(&self) -> Option<String> {
+        let n = self.game.state().move_log.len();
+        n.checked_sub(1).map(|i| self.describe_move(i))
+    }
+
+    /// Human-readable description of move `index` in the log.
+    /// Light moves first and turns strictly alternate (Pass and Swap
+    /// included), so move-index parity identifies the mover.
+    pub fn describe_move(&self, index: usize) -> String {
         let st = self.game.state();
-        let mv = st.move_log.last()?;
-        // Whose move was it? Light moves first and turns strictly alternate
-        // (Pass and Swap included), so move-index parity is authoritative.
-        let mover = if (st.move_log.len() - 1).is_multiple_of(2) {
+        let Some(mv) = st.move_log.get(index) else {
+            return String::new();
+        };
+        let mover = if index.is_multiple_of(2) {
             Player::Light
         } else {
             Player::Dark
@@ -125,7 +133,7 @@ impl Session {
             let ax = node.axial.unwrap_or([0, 0]);
             format!("{}[{},{}]", node.realm.name(), ax[0], ax[1])
         };
-        Some(match mv {
+        match mv {
             Move::Place(n) => format!("{} 落子 {}", mover.name(), describe_node(*n)),
             Move::CutEdge(e) => {
                 let edge = &bd.definition().edges[*e as usize];
@@ -140,7 +148,7 @@ impl Session {
             Move::Pass => format!("{} 停一手", mover.name()),
             Move::Swap => "换边".to_string(),
             Move::Resign => format!("{} 认输", mover.name()),
-        })
+        }
     }
 
     /// Nodes in components of `player`'s network that contain at least one

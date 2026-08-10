@@ -115,7 +115,9 @@ pub(crate) fn game_hud(
                 let local_live = matches!(s.connection, Connection::Local)
                     && !matches!(s.control, Control::Observer | Control::BotDuel)
                     && !s.game.state().move_log.is_empty();
-                if local_live && ui.button("↩ 悔棋").clicked() {
+                let undo_clicked = local_live && ui.button("↩ 悔棋 (U)").clicked();
+                if undo_clicked {
+                    view.review_cursor = None;
                     events.send(IntentEvent(PlayerIntent::Undo));
                 }
             }
@@ -543,6 +545,60 @@ pub(crate) fn game_over_panel(
             });
             if !ui_state.status.is_empty() {
                 ui.small(&ui_state.status);
+            }
+        });
+}
+
+/// Move-history side panel (toggle: H). Local games only; clicking a move
+/// opens the review cursor at that position — read-only, the live game is
+/// untouched, and "回到对局" returns to it.
+pub(crate) fn history_panel(
+    mut egui_ctx: EguiContexts,
+    session: Res<GameSession>,
+    mut view: ResMut<ViewSettings>,
+    keys: Res<ButtonInput<KeyCode>>,
+) {
+    if keys.just_pressed(KeyCode::KeyH) {
+        view.show_history = !view.show_history;
+    }
+    if !view.show_history {
+        return;
+    }
+    let s = &session.0;
+    let total = s.game.state().move_log.len();
+    let ctx = egui_ctx.ctx_mut();
+    egui::SidePanel::left("history")
+        .resizable(false)
+        .default_width(240.0)
+        .show(ctx, |ui| {
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                ui.heading("棋谱");
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(format!("{total} 手"));
+                });
+            });
+            ui.separator();
+            let review = view.review_cursor;
+            egui::ScrollArea::vertical()
+                .stick_to_bottom(review.is_none())
+                .show(ui, |ui| {
+                    for i in 0..total {
+                        let text = format!("{:>3}. {}", i + 1, s.describe_move(i));
+                        let selected = review == Some(i + 1);
+                        if ui.selectable_label(selected, text).clicked() {
+                            view.review_cursor = if selected { None } else { Some(i + 1) };
+                        }
+                    }
+                });
+            if review.is_some() {
+                ui.separator();
+                ui.colored_label(egui::Color32::YELLOW, "复盘模式：棋盘显示历史局面");
+                if ui.button("▶ 回到对局").clicked() {
+                    view.review_cursor = None;
+                }
+            } else {
+                ui.small("点击任意一手进入复盘");
             }
         });
 }

@@ -130,6 +130,25 @@ pub(crate) fn orbit_camera(
 
 // ----------------------------------------------------------- session set-up
 
+/// Keyboard shortcuts for local play: U = undo.
+pub(crate) fn shortcuts(
+    keys: Res<ButtonInput<KeyCode>>,
+    session: Option<Res<GameSession>>,
+    mut view: ResMut<ViewSettings>,
+    mut events: EventWriter<IntentEvent>,
+) {
+    let Some(session) = session else { return };
+    let s = &session.0;
+    if keys.just_pressed(KeyCode::KeyU)
+        && matches!(s.connection, Connection::Local)
+        && !matches!(s.control, Control::Observer | Control::BotDuel)
+        && !s.game.state().move_log.is_empty()
+    {
+        view.review_cursor = None;
+        events.send(IntentEvent(PlayerIntent::Undo));
+    }
+}
+
 pub(crate) fn toggle_cut_mode(
     keys: Res<ButtonInput<KeyCode>>,
     mut view: ResMut<ViewSettings>,
@@ -217,6 +236,9 @@ pub(crate) fn sync_board_visuals(
                           mut view: ResMut<ViewSettings>,
                           session: Res<GameSession>| {
                         let s = &session.0;
+                        if view.review_cursor.is_some() {
+                            return; // review mode is read-only
+                        }
                         if view.cut_mode {
                             // Two clicks pick an edge to cut.
                             match view.cut_anchor {
@@ -268,8 +290,16 @@ pub(crate) fn sync_board_visuals(
     let Some(shapes) = shapes_res else { return };
 
     // Node materials + positions reflect state & view mode every frame
-    // (≤183 nodes — trivially cheap, keeps logic out of the renderer).
-    let state = game.state();
+    // (≤400 nodes — trivially cheap, keeps logic out of the renderer).
+    // Review mode: render the historical position at the cursor instead.
+    let review_state = view.review_cursor.and_then(|k| {
+        let bd = BoardGraph::new(game.board().definition().clone()).ok()?;
+        let moves = &game.state().move_log[..k.min(game.state().move_log.len())];
+        realmweave_core::Game::replay(bd, game.config().clone(), moves)
+            .ok()
+            .map(|g| g.state().clone())
+    });
+    let state = review_state.as_ref().unwrap_or_else(|| game.state());
     let def = board.definition();
     let origins: std::collections::HashMap<NodeId, Player> =
         def.origins.iter().map(|o| (o.node, o.player)).collect();

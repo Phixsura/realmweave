@@ -15,6 +15,7 @@ mod netsync;
 mod replay;
 mod replay_ui;
 mod session;
+mod settings;
 mod steam;
 #[cfg(feature = "supplywar-lab")]
 mod supplywar_ui;
@@ -75,6 +76,7 @@ fn main() {
                     net_pump,
                     auto_reconnect,
                     toggle_cut_mode,
+                    shortcuts,
                     handle_intents,
                     bot_turn,
                     duel_turn,
@@ -84,6 +86,7 @@ fn main() {
                     orbit_camera,
                     game_hud,
                     game_over_panel,
+                    history_panel,
                     tutorial_panel.run_if(resource_exists::<Tutorial>),
                     duel_panel.run_if(resource_exists::<Duel>),
                 )
@@ -151,6 +154,10 @@ struct ViewSettings {
     cut_mode: bool,
     /// First endpoint selected in cut mode.
     cut_anchor: Option<NodeId>,
+    /// Move-history side panel visibility (H toggles).
+    show_history: bool,
+    /// Review cursor: Some(k) = board renders the position after move k.
+    review_cursor: Option<usize>,
 }
 
 impl Default for ViewSettings {
@@ -162,6 +169,8 @@ impl Default for ViewSettings {
             hovered: None,
             cut_mode: false,
             cut_anchor: None,
+            show_history: false,
+            review_cursor: None,
         }
     }
 }
@@ -185,6 +194,18 @@ struct UiState {
 
 impl Default for UiState {
     fn default() -> Self {
+        if let Some(p) = settings::load() {
+            return UiState {
+                board_size: p.board_size,
+                pie_rule: p.pie_rule,
+                ruleset: p.ruleset,
+                world_seed: 0,
+                server_addr: p.server_addr,
+                room_code: String::new(),
+                replay_path: String::new(),
+                status: String::new(),
+            };
+        }
         UiState {
             board_size: 91,
             pie_rule: false,
@@ -192,7 +213,7 @@ impl Default for UiState {
             world_seed: 0,
             server_addr: "127.0.0.1:8420".to_string(),
             room_code: String::new(),
-            replay_path: "demo-territory-hex61.json".to_string(),
+            replay_path: String::new(),
             status: String::new(),
         }
     }

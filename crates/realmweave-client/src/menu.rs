@@ -244,6 +244,15 @@ pub(crate) fn start_hotseat(
     world_seed: u64,
     human_vs_bot: Option<Player>,
 ) {
+    let prev_addr = crate::settings::load()
+        .map(|p| p.server_addr)
+        .unwrap_or_default();
+    crate::settings::save(&crate::settings::Prefs {
+        board_size: size,
+        pie_rule: pie,
+        ruleset: ruleset.to_string(),
+        server_addr: prev_addr,
+    });
     let def = if ruleset == realmweave_core::TRINITY_Y_V4 {
         // triangle side from the hex size pick: 19→8, 37→11, 61→14, 91→16, 127→19
         let side = match size {
@@ -270,6 +279,12 @@ pub(crate) fn start_hotseat(
 }
 
 pub(crate) fn start_online_create(commands: &mut Commands, ui: &mut UiState) {
+    crate::settings::save(&crate::settings::Prefs {
+        board_size: ui.board_size,
+        pie_rule: ui.pie_rule,
+        ruleset: ui.ruleset.clone(),
+        server_addr: ui.server_addr.clone(),
+    });
     let handle = net::connect(&ui.server_addr);
     let board_id = if ui.ruleset == realmweave_core::TRINITY_Y_V4 {
         "tri14-v4".to_string()
