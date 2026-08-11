@@ -32,7 +32,34 @@ struct Node {
 }
 
 impl Bot for MctsBot {
+    // The UCT tree explores Swap as a root move, and the engine route
+    // runs the production pie decision — either way this bot decides.
+    fn handles_pie(&self) -> bool {
+        true
+    }
+
     fn choose(&mut self, game: &Game) -> Option<Move> {
+        // Y-family boards: delegate to the production engine (fast Sim,
+        // ~1s/move at 3000 playouts). This tree keeps full Game clones and
+        // engine-level move-gen per rollout step — measured 265s/move on
+        // tf22, i.e. an 11-hour game. A CLI flag that silently never
+        // finishes is a bug, not a strength setting.
+        if game.board().definition().origins.is_empty()
+            && matches!(
+                game.config().ruleset_id.as_str(),
+                realmweave_core::TRINITY_Y_V4 | realmweave_core::TRIFORCE_V5
+            )
+        {
+            let seed = self.rng.gen::<u64>();
+            return realmweave_bot::choose_move_with_budget(
+                game,
+                seed,
+                realmweave_bot::mcts::MctsConfig {
+                    playouts: self.playouts,
+                    c: self.c,
+                },
+            );
+        }
         let moves: Vec<Move> = game
             .legal_moves()
             .into_iter()

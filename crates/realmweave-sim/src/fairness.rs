@@ -90,6 +90,36 @@ pub fn report(board: &BoardGraph) -> String {
 /// max-flow on the node-split graph. By Menger's theorem this equals the
 /// number of internally vertex-disjoint routes.
 pub fn min_vertex_cut(board: &BoardGraph, s: NodeId, t: NodeId) -> u32 {
+    // Adjacent endpoints: the direct edge is an uncuttable path (Menger
+    // counts internally-disjoint routes; a length-1 path has no interior).
+    // Without this guard the flow network admits the s_out->t_in infinite
+    // arc and "reports" a cut of u32::MAX/2. Cap the direct contribution
+    // at the degree-bound instead of returning infinity.
+    if board.neighbors(s).contains(&t) {
+        let interior = min_vertex_cut_no_direct(board, s, t);
+        return interior.saturating_add(1);
+    }
+    min_vertex_cut_no_direct(board, s, t)
+}
+
+/// BFS level assignment for one Dinic phase.
+fn bfs_levels(graph: &[Vec<(usize, u32, usize)>], source: usize, num: usize) -> Vec<usize> {
+    let mut level = vec![usize::MAX; num];
+    let mut queue = std::collections::VecDeque::new();
+    level[source] = 0;
+    queue.push_back(source);
+    while let Some(u) = queue.pop_front() {
+        for &(v, cap, _) in &graph[u] {
+            if cap > 0 && level[v] == usize::MAX {
+                level[v] = level[u] + 1;
+                queue.push_back(v);
+            }
+        }
+    }
+    level
+}
+
+fn min_vertex_cut_no_direct(board: &BoardGraph, s: NodeId, t: NodeId) -> u32 {
     // Node splitting: each node v becomes v_in (2v) and v_out (2v+1) with a
     // capacity-1 arc v_in→v_out (except s, t which get infinite capacity).
     // Each undirected edge (u,v) becomes u_out→v_in and v_out→u_in, cap 1
@@ -113,10 +143,15 @@ pub fn min_vertex_cut(board: &BoardGraph, s: NodeId, t: NodeId) -> u32 {
         };
         add_edge(&mut graph, 2 * v, 2 * v + 1, cap);
     }
+    // The direct s-t edge (if any) is handled by the caller: inside the
+    // flow network it would form an infinite-capacity s_out -> t_in arc.
+    let skip = |a: NodeId, b: NodeId| (a == s && b == t) || (a == t && b == s);
     for node in 0..n {
         for &nb in board.neighbors(node as NodeId) {
-            // Directed both ways; add once per ordered pair.
-            add_edge(&mut graph, 2 * node + 1, 2 * (nb as usize), inf);
+            if !skip(node as NodeId, nb) {
+                // Directed both ways; add once per ordered pair.
+                add_edge(&mut graph, 2 * node + 1, 2 * (nb as usize), inf);
+            }
         }
     }
     let source = 2 * (s as usize) + 1;
@@ -125,19 +160,7 @@ pub fn min_vertex_cut(board: &BoardGraph, s: NodeId, t: NodeId) -> u32 {
     // Dinic-lite (BFS levels + DFS blocking flow); graph is tiny.
     let mut flow = 0u32;
     loop {
-        // BFS levels.
-        let mut level = vec![usize::MAX; num];
-        let mut queue = std::collections::VecDeque::new();
-        level[source] = 0;
-        queue.push_back(source);
-        while let Some(u) = queue.pop_front() {
-            for &(v, cap, _) in &graph[u] {
-                if cap > 0 && level[v] == usize::MAX {
-                    level[v] = level[u] + 1;
-                    queue.push_back(v);
-                }
-            }
-        }
+        let level = bfs_levels(&graph, source, num);
         if level[sink] == usize::MAX {
             break;
         }

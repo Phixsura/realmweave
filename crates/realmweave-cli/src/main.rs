@@ -23,7 +23,7 @@ enum Command {
     /// Generate a standard three-realm hex board definition.
     GenBoard {
         /// Nodes per realm: 19, 37, 61, 91, or 127 (hex boards).
-        #[arg(long, conflicts_with = "trinity")]
+        #[arg(long, conflicts_with_all = ["trinity", "triforce"])]
         size: Option<usize>,
         /// Generate a trinity (triangular side-goal) board with this side
         /// length instead of a hex board.
@@ -33,6 +33,10 @@ enum Command {
         /// even side length.
         #[arg(long)]
         triforce: Option<usize>,
+        /// With --triforce: pierce the weave-heart (v5p variant, six nodes
+        /// removed; even side 22..=40).
+        #[arg(long, requires = "triforce")]
+        pierced: bool,
         /// Portal layout.
         #[arg(long, default_value = "inner6-outer6")]
         portals: String,
@@ -91,12 +95,20 @@ fn run(cli: Cli) -> Result<(), String> {
             size,
             trinity,
             triforce,
+            pierced,
             portals,
             output,
         } => {
             if let Some(side) = triforce {
-                let def = boardgen::generate_triforce(side)
-                    .ok_or_else(|| format!("unsupported triforce side {side}; use even 8..=40"))?;
+                let def = if pierced {
+                    boardgen::generate_triforce_pierced(side).ok_or_else(|| {
+                        format!("unsupported pierced side {side}; use even 22..=40")
+                    })?
+                } else {
+                    boardgen::generate_triforce(side).ok_or_else(|| {
+                        format!("unsupported triforce side {side}; use even 8..=40")
+                    })?
+                };
                 validate_board(&def)
                     .map_err(|e| format!("generated board failed validation: {e}"))?;
                 let json = serde_json::to_string_pretty(&def).map_err(|e| e.to_string())?;
@@ -253,12 +265,21 @@ fn run(cli: Cli) -> Result<(), String> {
                 Some(result) => println!("result: {result:?}"),
                 None => println!("game in progress; {} to move", game.to_move().name()),
             }
-            if rec.result != game.result() {
-                return Err(format!(
-                    "record result {:?} does not match replayed result {:?}",
-                    rec.result,
-                    game.result()
-                ));
+            // Server-adjudicated endings (timeout, off-turn resignation)
+            // are deliberately NOT in the move log — the engine cannot
+            // produce them — so a record result the replay lacks is only a
+            // contradiction when the replayed game reached a DIFFERENT
+            // result, not when it reached none.
+            match (&rec.result, game.result()) {
+                (Some(recorded), Some(replayed)) if *recorded != replayed => {
+                    return Err(format!(
+                        "record result {recorded:?} contradicts replayed result {replayed:?}"
+                    ));
+                }
+                (Some(recorded), None) => {
+                    println!("server-adjudicated ending: {recorded:?} (not derivable from moves)");
+                }
+                _ => {}
             }
             Ok(())
         }

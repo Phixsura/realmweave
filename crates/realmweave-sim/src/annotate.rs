@@ -59,9 +59,14 @@ fn zero_one(game: &Game, from: NodeId, to: NodeId, player: Player) -> Option<i64
         if cur == to {
             return Some(dist[cur as usize]);
         }
-        for &next in board.neighbors(cur) {
+        // Live edges only: annotating a sever record through cut edges
+        // reports distances along roads that no longer exist.
+        for next in board.live_neighbors(cur, &state.cut_edges) {
             let cost = match state.occupant(next) {
                 Some(p) if p == player => 0,
+                None if state.is_petrified(next) && !state.fossil_road_for(next, player) => {
+                    continue
+                }
                 None => 1,
                 _ => continue,
             };

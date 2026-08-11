@@ -223,6 +223,14 @@ impl Room {
         if self.finished {
             return Err("game is finished".to_string());
         }
+        // Flag-fall is checked HERE, not only by the 1-second ticker: a
+        // move landing inside the tick window after the bank hit zero
+        // would otherwise be accepted — and with increment it would even
+        // REVIVE the flagged player (0 − elapsed saturates to 0, then
+        // +increment), making time losses unenforceable.
+        if self.flagged() == Some(self.game.to_move()) {
+            return Err("flag fell".to_string());
+        }
         // Resignation is legal at any time (like chess). The ENGINE models
         // Resign as "the mover resigns", so an off-turn resignation must be
         // adjudicated by the server instead of routed through the engine

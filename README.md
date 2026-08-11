@@ -54,8 +54,8 @@ cargo test --workspace
 # validate the shipped boards
 cargo run -p realmweave-cli -- validate boards/*.json
 
-# play a local two-player game in the terminal (supply rules by default)
-cargo run -p realmweave-cli -- play --board boards/hex91-v1.json
+# play a local two-player game in the terminal (flagship 织心 rules)
+cargo run -p realmweave-cli -- play --board boards/tf22-v5.json --ruleset triforce-v5
 # blitz mode (classic weave race)
 cargo run -p realmweave-cli -- play --board boards/hex37-v1.json --ruleset three-realms-v1
 
@@ -100,6 +100,11 @@ cargo run -p realmweave-sim -- compare --board-a boards/hex19-v1.json --board-b 
   state; every finished game is replayable.
 - Distribution target is a native desktop client (Steam); rendering is
   modular and never touches rules.
+- CI gates (all SHA-pinned, aggregated by the required `ci-gate` check):
+  fmt/clippy/tests on three OSes, shipped boards regenerate byte-identical
+  from their generators, cargo-deny advisories+licenses, lizard complexity
+  ratchet (`whitelizard.txt`), jscpd duplication (≤5%), zizmor workflow
+  lint, CodeQL, secret scan, dependency review, OpenSSF Scorecard.
 
 ## License
 

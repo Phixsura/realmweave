@@ -7,6 +7,12 @@ use rand::Rng;
 use realmweave_core::{Game, Move, NodeId, Player};
 
 pub trait Bot {
+    /// Whether this bot makes its own pie-rule swap decision (the batch
+    /// runner must then NOT pre-empt it with the rollout estimator).
+    fn handles_pie(&self) -> bool {
+        false
+    }
+
     fn choose(&mut self, game: &Game) -> Option<Move>;
 }
 
@@ -138,6 +144,12 @@ fn connection_score(game: &Game, player: Player, extra: Option<NodeId>) -> i64 {
         if Some(n) == extra {
             return true;
         }
+        // Petrified nodes read as empty in `occupant`, but only opponent
+        // fossils are roads for us — our own are walls, and unpetrified
+        // rules never set the flag, so this is a no-op for classic.
+        if state.is_petrified(n) {
+            return state.fossil_road_for(n, player);
+        }
         match state.occupant(n) {
             None => true,
             Some(p) => p == player,
@@ -174,7 +186,9 @@ fn zero_one_bfs(
         if cur == to {
             return Some(dist[cur as usize]);
         }
-        for &next in board.neighbors(cur) {
+        // Cut edges are PERMANENT in sever rulesets: scoring through them
+        // means reinforcing routes that no longer exist on the board.
+        for next in board.live_neighbors(cur, &state.cut_edges) {
             if !passable(next) {
                 continue;
             }

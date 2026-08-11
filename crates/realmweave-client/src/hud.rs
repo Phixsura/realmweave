@@ -8,11 +8,34 @@ use crate::layout::ViewMode;
 use crate::net;
 use crate::session::{Connection, Control, PlayerIntent, Session};
 use crate::{
-    tutorial, Active, BoardSpawned, Duel, GameSession, IntentEvent, LocalClocks, Net, NodeMarker,
-    Palette, Replay, Tutorial, UiState, ViewSettings,
+    tutorial, Active, BoardSpawned, Duel, GameSession, HudHeight, IntentEvent, LocalClocks, Net,
+    NodeMarker, Palette, Replay, Tutorial, UiState, ViewSettings,
 };
 use realmweave_core::{BoardGraph, GameResult, NodeId, Player, WinReason};
 use realmweave_protocol::ClientMessage;
+
+/// egui 0.35 panels attach to a `Ui`, not a `Context` — build the
+/// full-viewport background root that top-level panels dock into.
+/// `id` must be unique per system (it names the root's egui Id).
+pub(crate) fn root_ui(ctx: &egui::Context, id: &'static str) -> egui::Ui {
+    root_ui_below(ctx, id, 0.0)
+}
+
+/// Like [`root_ui`] but starting `top_offset` px down: each system builds
+/// its own root, so panels do NOT reserve space from each other the way
+/// context-level panels do — a full-height side panel would paint over
+/// (and steal clicks from) the top HUD bar without this.
+pub(crate) fn root_ui_below(ctx: &egui::Context, id: &'static str, top_offset: f32) -> egui::Ui {
+    let mut rect = ctx.viewport_rect();
+    rect.min.y += top_offset;
+    egui::Ui::new(
+        ctx.clone(),
+        id.into(),
+        egui::UiBuilder::new()
+            .layer_id(egui::LayerId::background())
+            .max_rect(rect),
+    )
+}
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn game_hud(
@@ -20,16 +43,18 @@ pub(crate) fn game_hud(
     mut egui_ctx: EguiContexts,
     session: Res<GameSession>,
     mut view: ResMut<ViewSettings>,
-    mut events: EventWriter<IntentEvent>,
+    mut events: MessageWriter<IntentEvent>,
     mut ui_state: ResMut<UiState>,
     net: Res<Net>,
     mut replay: Option<ResMut<Replay>>,
     nodes: Query<Entity, With<NodeMarker>>,
     clocks: Res<LocalClocks>,
+    mut hud_height: ResMut<HudHeight>,
 ) {
-    let ctx = egui_ctx.ctx_mut();
+    let Ok(ctx) = egui_ctx.ctx_mut() else { return };
+    let mut root = root_ui(ctx, "hud_root");
     let s = &session.0;
-    egui::TopBottomPanel::top("hud").show(ctx, |ui| {
+    let hud_response = egui::Panel::top("hud").show(&mut root, |ui| {
         ui.horizontal(|ui| {
             ui.label(egui::RichText::new("Realmweave").strong());
             ui.separator();
@@ -102,7 +127,7 @@ pub(crate) fn game_hud(
             let observing = matches!(s.control, Control::Observer);
             if !observing {
                 if s.swap_available() && ui.button("swap sides (pie)").clicked() {
-                    events.send(IntentEvent(PlayerIntent::Swap));
+                    events.write(IntentEvent(PlayerIntent::Swap));
                 }
                 // Pass availability is a ruleset capability, NOT an
                 // enumeration of every legal move each frame.
@@ -110,10 +135,10 @@ pub(crate) fn game_hud(
                     && s.game.rules().allows_pass()
                     && ui.button("pass").clicked()
                 {
-                    events.send(IntentEvent(PlayerIntent::Pass));
+                    events.write(IntentEvent(PlayerIntent::Pass));
                 }
                 if s.result().is_none() && ui.button("resign").clicked() {
-                    events.send(IntentEvent(PlayerIntent::Resign));
+                    events.write(IntentEvent(PlayerIntent::Resign));
                 }
                 // Local undo: hot-seat takes back one move; vs-AI takes back
                 // the human's move AND the AI's reply. Never online.
@@ -123,7 +148,7 @@ pub(crate) fn game_hud(
                 let undo_clicked = local_live && ui.button("↩ 悔棋 (U)").clicked();
                 if undo_clicked {
                     view.review_cursor = None;
-                    events.send(IntentEvent(PlayerIntent::Undo));
+                    events.write(IntentEvent(PlayerIntent::Undo));
                 }
             }
             let charges = s.game.state().sever_charges;
@@ -250,8 +275,16 @@ pub(crate) fn game_hud(
         ui.horizontal(|ui| {
             match &s.connection {
                 Connection::Local => match s.control {
-                    Control::VsBot(human) => {
-                        ui.label(format!("人机对战 — 你执{}", human.name()));
+                    Control::VsBot(_) => {
+                        // Derived color: a pie swap hands the human the
+                        // other side without touching Control.
+                        let human = s.vs_bot_human().unwrap_or(Player::Light);
+                        let swapped = if s.swap_happened() {
+                            "（已换边）"
+                        } else {
+                            ""
+                        };
+                        ui.label(format!("人机对战 — 你执{}{swapped}", human.name()));
                         if s.result().is_none() && s.game.to_move() != human {
                             ui.colored_label(egui::Color32::YELLOW, "AI 思考中…");
                         }
@@ -349,6 +382,7 @@ pub(crate) fn game_hud(
             });
         }
     });
+    hud_height.0 = hud_response.response.rect.height();
 }
 
 /// Human-readable description of a node for the hover tooltip.
@@ -357,8 +391,8 @@ pub(crate) fn node_tooltip(session: &Session, id: NodeId) -> String {
     let def = board.definition();
     let node = &def.nodes[id as usize];
     let realm = if session.game.config().ruleset_id == realmweave_core::TRIFORCE_V5 {
-        let side = (((8 * board.node_count() + 1) as f64).sqrt() as usize - 1) / 2;
-        match realmweave_core::boardgen::triforce_region(side, id) {
+        let side = realmweave_core::boardgen::tf_side_len(def);
+        match realmweave_core::boardgen::triforce_region(def, side, id) {
             0 => "Heaven",
             1 => "Mortal",
             2 => "Underworld",
@@ -418,6 +452,7 @@ pub(crate) fn tutorial_panel(
     mut commands: Commands,
     mut egui_ctx: EguiContexts,
     mut tut: ResMut<Tutorial>,
+    hud_height: Res<HudHeight>,
     session: Res<GameSession>,
     nodes: Query<Entity, With<NodeMarker>>,
     mut ui_state: ResMut<UiState>,
@@ -426,11 +461,12 @@ pub(crate) fn tutorial_panel(
     tut.0.advance(game);
     let (title, body, button) = tut.0.text(game);
     let (idx, total) = tut.0.progress();
-    let ctx = egui_ctx.ctx_mut();
-    egui::SidePanel::right("tutorial")
+    let Ok(ctx) = egui_ctx.ctx_mut() else { return };
+    let mut root = root_ui_below(ctx, "tutorial_root", hud_height.0);
+    egui::Panel::right("tutorial")
         .resizable(false)
-        .default_width(320.0)
-        .show(ctx, |ui| {
+        .default_size(320.0)
+        .show(&mut root, |ui| {
             ui.add_space(8.0);
             ui.horizontal(|ui| {
                 ui.heading(title);
@@ -476,6 +512,7 @@ pub(crate) fn tutorial_panel(
 /// Game-over modal: result, per-realm outcome, and next actions. Local
 /// modes offer save/rematch; online games just surface the result.
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::unwrap_used, clippy::expect_used)] // construction-time invariants: generated boards validate (CI-gated), live games replay
 pub(crate) fn game_over_panel(
     mut commands: Commands,
     mut egui_ctx: EguiContexts,
@@ -494,7 +531,7 @@ pub(crate) fn game_over_panel(
     };
     let is_local = matches!(session.0.connection, Connection::Local);
     let ruleset = session.0.game.config().ruleset_id.clone();
-    let ctx = egui_ctx.ctx_mut();
+    let Ok(ctx) = egui_ctx.ctx_mut() else { return };
     egui::Window::new("对局结束")
         .collapsible(false)
         .resizable(false)
@@ -540,12 +577,14 @@ pub(crate) fn game_over_panel(
                     let bd = session.0.game.board();
                     let st = session.0.game.state();
                     let n = bd.node_count();
-                    let side = (((8 * n + 1) as f64).sqrt() as usize - 1) / 2;
+                    let side = realmweave_core::boardgen::tf_side_len(bd.definition());
                     let mut counts = [0u32; 4];
                     for id in 0..n as realmweave_core::NodeId {
-                        if st.occupant(id) == Some(player) {
-                            counts[realmweave_core::boardgen::triforce_region(side, id)] += 1;
-                        }
+                        counts[realmweave_core::boardgen::triforce_region(
+                            bd.definition(),
+                            side,
+                            id,
+                        )] += (st.occupant(id) == Some(player)) as u32;
                     }
                     ui.label(format!(
                         "胜方布阵：天{} 人{} 冥{} 织心{}",
@@ -584,6 +623,10 @@ pub(crate) fn game_over_panel(
                     let mut next = Session::hotseat_with_rules(board, pie, &rules_id);
                     next.control = control;
                     session.0 = next;
+                    // A live review cursor would render the new empty game
+                    // as "复盘中：第 k/0 手" with clicks swallowed.
+                    commands.insert_resource(ViewSettings::default());
+                    commands.insert_resource(LocalClocks::default());
                 }
                 if ui.button("返回菜单").clicked() {
                     leave_session(&mut commands, &nodes, &mut ui_state);
@@ -601,6 +644,7 @@ pub(crate) fn game_over_panel(
 pub(crate) fn history_panel(
     mut egui_ctx: EguiContexts,
     session: Res<GameSession>,
+    hud_height: Res<HudHeight>,
     mut view: ResMut<ViewSettings>,
     keys: Res<ButtonInput<KeyCode>>,
 ) {
@@ -612,11 +656,12 @@ pub(crate) fn history_panel(
     }
     let s = &session.0;
     let total = s.game.state().move_log.len();
-    let ctx = egui_ctx.ctx_mut();
-    egui::SidePanel::left("history")
+    let Ok(ctx) = egui_ctx.ctx_mut() else { return };
+    let mut root = root_ui_below(ctx, "history_root", hud_height.0);
+    egui::Panel::left("history")
         .resizable(false)
-        .default_width(240.0)
-        .show(ctx, |ui| {
+        .default_size(240.0)
+        .show(&mut root, |ui| {
             ui.add_space(6.0);
             ui.horizontal(|ui| {
                 ui.heading("棋谱");
@@ -666,6 +711,12 @@ pub(crate) fn leave_session(
     commands.remove_resource::<BoardSpawned>();
     commands.remove_resource::<Palette>();
     commands.remove_resource::<Replay>();
+    // Per-session view state must not leak into the next game: a stale
+    // cut_mode from a scissors ruleset locks a Y-family game out of
+    // placing entirely (its toggles early-return), and a stale
+    // review_cursor renders an empty board under "复盘中".
+    commands.insert_resource(ViewSettings::default());
+    commands.insert_resource(LocalClocks::default());
     for entity in nodes {
         commands.entity(entity).despawn();
     }

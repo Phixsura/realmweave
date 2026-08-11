@@ -5,7 +5,9 @@
 //!
 //!   1. Place a stone on any empty node (pie swap available to Dark).
 //!      DEATH: a group with no liberties is captured; suicide illegal;
-//!      recreating a previous position illegal (positional superko).
+//!      recreating a previous position with the same player to move
+//!      illegal (SITUATIONAL superko — the deliberate choice recorded in
+//!      docs/design-triforce-v5.md §4; hashes include to_move).
 //!   2. WEAVE: connect all three sides of the great triangle with one
 //!      group. First weave wins. The Y theorem guarantees exactly one
 //!      player can ever do this on a full board — no draws, and blocking
@@ -29,10 +31,9 @@ pub struct Triforce {
 }
 
 impl Triforce {
-    /// Big-triangle side length from the node count (side*(side+1)/2).
+    /// Big-triangle side length (deepest axial row + 1; pierced-safe).
     fn side_of(board: &BoardGraph) -> usize {
-        let n = board.node_count();
-        (((((8 * n + 1) as f64).sqrt() - 1.0) / 2.0).round()) as usize
+        crate::boardgen::tf_side_len(board.definition())
     }
 
     /// Who (if anyone) has woven the great triangle: one group touching
@@ -49,13 +50,13 @@ impl Triforce {
                 let mut queue = VecDeque::new();
                 visited[start as usize] = true;
                 queue.push_back(start);
-                let mut touch = crate::boardgen::triforce_sides(side, start);
+                let mut touch = crate::boardgen::triforce_sides(board.definition(), side, start);
                 while let Some(cur) = queue.pop_front() {
                     for &nb in board.neighbors(cur) {
                         if !visited[nb as usize] && state.occupant(nb) == Some(player) {
                             visited[nb as usize] = true;
                             queue.push_back(nb);
-                            touch |= crate::boardgen::triforce_sides(side, nb);
+                            touch |= crate::boardgen::triforce_sides(board.definition(), side, nb);
                         }
                     }
                 }
@@ -83,14 +84,14 @@ impl Triforce {
             let mut queue = VecDeque::from([start]);
             visited[start as usize] = true;
             let mut len = 1usize;
-            let mut touch = crate::boardgen::triforce_sides(side, start);
+            let mut touch = crate::boardgen::triforce_sides(board.definition(), side, start);
             while let Some(cur) = queue.pop_front() {
                 for &nb in board.neighbors(cur) {
                     if !visited[nb as usize] && state.occupant(nb) == Some(player) {
                         visited[nb as usize] = true;
                         queue.push_back(nb);
                         len += 1;
-                        touch |= crate::boardgen::triforce_sides(side, nb);
+                        touch |= crate::boardgen::triforce_sides(board.definition(), side, nb);
                     }
                 }
             }

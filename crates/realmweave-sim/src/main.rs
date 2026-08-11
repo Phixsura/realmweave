@@ -4,6 +4,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)] // offline tooling: fail fast is correct
 mod annotate;
 mod bots;
+mod center;
 mod fairness;
 mod mcts;
 mod stats;
@@ -80,6 +81,20 @@ enum Command {
         #[arg(long, default_value_t = 400)]
         playouts: u32,
     },
+    /// Measure center dominance on a triforce board: forced-opening win
+    /// rates + free-game heart occupancy, judged against fixed criteria.
+    Center {
+        #[arg(long)]
+        board: PathBuf,
+        /// Games per forced opening (and free games for occupancy).
+        #[arg(long, default_value_t = 12)]
+        games: u32,
+        /// Engine MCTS playouts per move.
+        #[arg(long, default_value_t = 2000)]
+        playouts: u32,
+        #[arg(long, default_value_t = 42)]
+        seed: u64,
+    },
     /// Graph-level fairness analysis of a board definition.
     Fairness {
         #[arg(long)]
@@ -155,6 +170,14 @@ fn estimate_light_winrate(game: &Game, rollouts: u32, rng: &mut StdRng) -> f64 {
                 .filter(|m| matches!(m, Move::Place(_) | Move::Sever(_)))
                 .collect();
             let Some(&mv) = placements.choose(rng) else {
+                // No placement: continue via Pass where legal; a rollout
+                // stuck with no result must score 0.5, not silently count
+                // as a Dark win (which deflated light_wr and biased every
+                // --pie batch's swap rate).
+                if sim.play(Move::Pass).is_ok() {
+                    continue;
+                }
+                light_score += 0.5;
                 break;
             };
             let _ = sim.play(mv);
@@ -200,11 +223,17 @@ fn run_batch(board: &BoardGraph, opts: &BatchOptions) -> Result<BatchStats, Stri
         let mut pie_rng = StdRng::seed_from_u64(opts.seed.wrapping_add(g as u64).wrapping_mul(31));
 
         while game.result().is_none() {
-            // Pie decision on Dark's first response.
+            // Pie decision on Dark's first response. Bots that decide the
+            // swap themselves (MCTS) are left alone — pre-empting them
+            // here would let the bot ALSO swap later with the person
+            // bookkeeping already closed, silently corrupting per-person
+            // stats. The rollout estimator only stands in for bots with
+            // no pie judgment of their own (random/greedy).
             if opts.pie
                 && !swapped
                 && game.state().ply == 1
                 && game.legal_moves().contains(&Move::Swap)
+                && !dark.handles_pie()
             {
                 let light_wr = estimate_light_winrate(&game, 40, &mut pie_rng);
                 if light_wr > 0.5 {
@@ -222,6 +251,12 @@ fn run_batch(board: &BoardGraph, opts: &BatchOptions) -> Result<BatchStats, Stri
             };
             let Some(mv) = bot.choose(&game) else { break };
             game.play(mv).map_err(|e| e.to_string())?;
+            if mv == Move::Swap {
+                // The bot exercised the pie rule itself: same seat
+                // exchange as the estimator path.
+                person_a_plays = Player::Dark;
+                swapped = true;
+            }
         }
         if g == 0 {
             if let Some(path) = opts.record {
@@ -317,6 +352,22 @@ fn run(cli: Cli) -> Result<(), String> {
                 stats_a.summary(&format!("[A] {}", a.definition().id))
             );
             println!("{}", stats_b.summary(&format!("[B] {}", b.definition().id)));
+            Ok(())
+        }
+        Command::Center {
+            board,
+            games,
+            playouts,
+            seed,
+        } => {
+            let graph = load(&board)?;
+            if graph.definition().family() != realmweave_core::BoardFamily::MergedTriangle {
+                return Err(format!(
+                    "{} is not a merged-triangle (triforce) board",
+                    graph.definition().id
+                ));
+            }
+            print!("{}", center::report(&graph, games, playouts, seed));
             Ok(())
         }
         Command::Fairness { board } => {

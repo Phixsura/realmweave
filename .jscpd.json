@@ -1,0 +1,12 @@
+{
+  "threshold": 5,
+  "reporters": ["console"],
+  "ignore": [
+    "**/target/**",
+    "**/boards/**",
+    "**/*_test.rs",
+    "**/tests/**",
+    "**/examples/**"
+  ],
+  "format": ["rust"]
+}

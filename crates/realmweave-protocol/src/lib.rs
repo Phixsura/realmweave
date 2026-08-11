@@ -154,13 +154,23 @@ pub fn encode<T: Serialize>(envelope: &Envelope<T>) -> String {
 
 /// Decode a JSON text frame, enforcing the protocol version.
 pub fn decode<T: for<'de> Deserialize<'de>>(text: &str) -> Result<Envelope<T>, DecodeError> {
-    let envelope: Envelope<T> = serde_json::from_str(text)?;
-    if envelope.v != PROTOCOL_VERSION {
-        return Err(DecodeError::VersionMismatch {
-            expected: PROTOCOL_VERSION,
-            actual: envelope.v,
-        });
+    // Peek the version BEFORE deserializing the payload: a future-version
+    // peer's renamed variants would otherwise fail as "malformed message",
+    // and the client could never distinguish "upgrade required" from
+    // garbage — defeating the point of versioning the envelope.
+    #[derive(Deserialize)]
+    struct VersionOnly {
+        v: u32,
     }
+    if let Ok(VersionOnly { v }) = serde_json::from_str::<VersionOnly>(text) {
+        if v != PROTOCOL_VERSION {
+            return Err(DecodeError::VersionMismatch {
+                expected: PROTOCOL_VERSION,
+                actual: v,
+            });
+        }
+    }
+    let envelope: Envelope<T> = serde_json::from_str(text)?;
     Ok(envelope)
 }
 

@@ -17,7 +17,8 @@ use super::*;
 ///      captured and removed. Your placement captures the enemy first;
 ///      a move that leaves your own group with no liberties is illegal
 ///      (suicide), and recreating a previous whole-board position is
-///      illegal (positional superko) — the ko rule, exactly as in Go.
+///      illegal with the same player to move (SITUATIONAL superko, the
+///      documented choice — see docs/design-triforce-v5.md §4).
 ///   3. A realm is WON by the player whose single group connects all three
 ///      of that realm's sides (Y). Won realms are sealed: their stones are
 ///      immortal and the realm is closed to further play.
@@ -234,7 +235,7 @@ impl RuleSet for TrinityY {
                 if sealed[Self::realm_of(board, *node)] {
                     return Err(RuleError::Occupied(*node)); // sealed realm is closed
                 }
-                // Go dynamics: suicide + positional superko.
+                // Go dynamics: suicide + situational superko.
                 let mut occ = state.occupancy.clone();
                 if Self::place_with_capture(board, &mut occ, &sealed, *node, state.to_move)
                     .is_none()

@@ -35,6 +35,14 @@ realms, so a winning weave must cross realm borders, and all strategy
 converges on the contested heart (measured: 100% of winning groups span
 ≥2 realms and touch the heart — docs/research-triforce.md).
 
+**Pierced variant (`tf{side}-v5p`, 空心织心):** the same rules on a board
+with six weave-heart nodes removed (symmetrically) and the holes
+re-stitched with triangles — the documented counter to flat-Y center
+dominance. The Y theorem still holds (every internal face remains a
+triangle). Toggle it in the menu; sides 22–40. Measurements comparing
+the two boards live in docs/design-triforce-v5.md §4.5 — which board
+*feels* better is a human call.
+
 ---
 
 ## Trinity Y (`trinity-y-v4`)

@@ -15,12 +15,13 @@ use crate::{
 use realmweave_core::{boardgen, BoardGraph, Player};
 use realmweave_protocol::ClientMessage;
 
+#[allow(clippy::unwrap_used, clippy::expect_used)] // construction-time invariants: generated boards validate (CI-gated), live games replay
 pub(crate) fn menu_ui(
     mut commands: Commands,
     mut egui_ctx: EguiContexts,
     mut ui_state: ResMut<UiState>,
 ) {
-    let ctx = egui_ctx.ctx_mut();
+    let Ok(ctx) = egui_ctx.ctx_mut() else { return };
     // F1: launch Supply War with the demo AI at the wheel (lab feature).
     #[cfg(feature = "supplywar-lab")]
     if ctx.input(|i| i.key_pressed(egui::Key::F1)) {
@@ -30,7 +31,8 @@ pub(crate) fn menu_ui(
         commands.insert_resource(Active);
         return;
     }
-    egui::CentralPanel::default().show(ctx, |ui| {
+    let mut root = crate::hud::root_ui(ctx, "menu_root");
+    egui::CentralPanel::default().show(&mut root, |ui| {
         ui.vertical_centered(|ui| {
             ui.add_space(60.0);
             ui.heading(egui::RichText::new("REALMWEAVE").size(42.0));
@@ -51,6 +53,23 @@ pub(crate) fn menu_ui(
                 realmweave_core::TRINITY_Y_V4 | realmweave_core::TRIFORCE_V5
             ) {
                 ui.small("（三角棋盘尺寸由此行间接决定：越大越长局）");
+            }
+            if ui_state.ruleset == realmweave_core::TRIFORCE_V5 {
+                // Pierced hearts need a triangle side >= 22 (91×3 pick and up):
+                // smaller hearts cannot host the symmetric deletion orbit.
+                let side_ok = ui_state.board_size >= 91;
+                if !side_ok {
+                    ui_state.pierced_heart = false;
+                }
+                ui.add_enabled(
+                    side_ok,
+                    egui::Checkbox::new(
+                        &mut ui_state.pierced_heart,
+                        "空心织心 (v5p：心区挖孔，稀释中心)",
+                    ),
+                )
+                .on_hover_text("移除六个织心节点并重新连边——针对平面 Y 类棋中心过强的对策")
+                .on_disabled_hover_text("需要 91×3 以上尺寸（更小的织心容不下对称挖孔）");
             }
             ui.checkbox(&mut ui_state.pie_rule, "pie rule (second player may swap)");
             ui.horizontal(|ui| {
@@ -126,6 +145,7 @@ pub(crate) fn menu_ui(
                         ui_state.pie_rule,
                         &ui_state.ruleset.clone(),
                         ui_state.world_seed,
+                        ui_state.pierced_heart,
                         None,
                     );
                 }
@@ -138,6 +158,7 @@ pub(crate) fn menu_ui(
                             ui_state.pie_rule,
                             &ui_state.ruleset.clone(),
                             ui_state.world_seed,
+                            ui_state.pierced_heart,
                             Some(Player::Light),
                         );
                     }
@@ -149,6 +170,7 @@ pub(crate) fn menu_ui(
                             ui_state.pie_rule,
                             &ui_state.ruleset.clone(),
                             ui_state.world_seed,
+                            ui_state.pierced_heart,
                             Some(Player::Dark),
                         );
                     }
@@ -175,7 +197,11 @@ pub(crate) fn menu_ui(
                     .clicked()
             {
                 let def = if ui_state.ruleset == realmweave_core::TRIFORCE_V5 {
-                    boardgen::generate_triforce(22).expect("triforce board")
+                    if ui_state.pierced_heart {
+                        boardgen::generate_triforce_pierced(22).expect("pierced board")
+                    } else {
+                        boardgen::generate_triforce(22).expect("triforce board")
+                    }
                 } else if ui_state.ruleset == realmweave_core::TRINITY_Y_V4 {
                     boardgen::generate_trinity(14).expect("trinity board")
                 } else {
@@ -213,6 +239,7 @@ pub(crate) fn menu_ui(
                     false,
                     realmweave_core::TRIFORCE_V5,
                     0,
+                    false, // tutorial always uses the solid board
                     Some(Player::Light),
                 );
                 commands.insert_resource(Tutorial(tutorial::TutorialState::new()));
@@ -261,12 +288,14 @@ pub(crate) fn menu_ui(
     });
 }
 
+#[allow(clippy::unwrap_used, clippy::expect_used)] // construction-time invariants: generated boards validate (CI-gated), live games replay
 pub(crate) fn start_hotseat(
     commands: &mut Commands,
     size: usize,
     pie: bool,
     ruleset: &str,
     world_seed: u64,
+    pierced: bool,
     human_vs_bot: Option<Player>,
 ) {
     let prev_addr = crate::settings::load()
@@ -287,7 +316,12 @@ pub(crate) fn start_hotseat(
             91 => 22,
             _ => 26,
         };
-        boardgen::generate_triforce(side).expect("triforce board")
+        if pierced {
+            // menu disables the checkbox below side 22; expect is the backstop
+            boardgen::generate_triforce_pierced(side).expect("pierced board")
+        } else {
+            boardgen::generate_triforce(side).expect("triforce board")
+        }
     } else if ruleset == realmweave_core::TRINITY_Y_V4 {
         // triangle side from the hex size pick: 19→8, 37→11, 61→14, 91→16, 127→19
         let side = match size {
@@ -323,7 +357,11 @@ pub(crate) fn start_online_create(commands: &mut Commands, ui: &mut UiState) {
     });
     let handle = net::connect(&ui.server_addr);
     let board_id = if ui.ruleset == realmweave_core::TRIFORCE_V5 {
-        "tf22-v5".to_string()
+        if ui.pierced_heart {
+            "tf22-v5p".to_string()
+        } else {
+            "tf22-v5".to_string()
+        }
     } else if ui.ruleset == realmweave_core::TRINITY_Y_V4 {
         "tri14-v4".to_string()
     } else {
@@ -358,6 +396,7 @@ pub(crate) fn start_online_create(commands: &mut Commands, ui: &mut UiState) {
     }
 }
 
+#[allow(clippy::unwrap_used, clippy::expect_used)] // construction-time invariants: generated boards validate (CI-gated), live games replay
 pub(crate) fn start_replay(commands: &mut Commands, ui: &mut UiState, auto_seconds: f32) {
     match replay::ReplayState::load(&ui.replay_path) {
         Ok(mut state) => {
@@ -390,6 +429,7 @@ pub(crate) fn start_replay(commands: &mut Commands, ui: &mut UiState, auto_secon
     }
 }
 
+#[allow(clippy::unwrap_used, clippy::expect_used)] // construction-time invariants: generated boards validate (CI-gated), live games replay
 pub(crate) fn start_online_join(commands: &mut Commands, ui: &mut UiState) {
     let code = ui.room_code.trim().to_uppercase();
     if code.is_empty() {
@@ -414,6 +454,7 @@ pub(crate) fn start_online_join(commands: &mut Commands, ui: &mut UiState) {
 
 /// Resume a saved (possibly unfinished) game record as a live vs-AI
 /// session: the human takes whichever color is to move.
+#[allow(clippy::unwrap_used, clippy::expect_used)] // construction-time invariants: generated boards validate (CI-gated), live games replay
 pub(crate) fn resume_saved(commands: &mut Commands, ui: &mut UiState) {
     let text = match std::fs::read_to_string(&ui.replay_path) {
         Ok(t) => t,
@@ -442,7 +483,16 @@ pub(crate) fn resume_saved(commands: &mut Commands, ui: &mut UiState) {
     };
     match realmweave_core::Game::replay_record(board, &record) {
         Ok(game) => {
-            let human = game.to_move();
+            // Control::VsBot stores the human's PRE-SWAP pick and
+            // vs_bot_human() re-applies the log's Swap on top — seeding it
+            // with the current to-move color in a swapped record would
+            // double-flip and hand the human's seat to the bot at resume.
+            let to_move = game.to_move();
+            let swapped = matches!(
+                game.state().move_log.get(1),
+                Some(realmweave_core::Move::Swap)
+            );
+            let human = if swapped { to_move.opponent() } else { to_move };
             let board2 = BoardGraph::new(game.board().definition().clone()).expect("round-trip");
             let mut session = Session::hotseat_with_rules(
                 board2,

@@ -200,7 +200,11 @@ fn trinity_cost(game: &Game, player: Player) -> i64 {
     // Triforce: one realm spanning the board; trinity: three partitions.
     let triforce = game.config().ruleset_id == rules::TRIFORCE_V5;
     let per_realm = if triforce { n } else { n / 3 };
-    let side_len = (((8 * per_realm + 1) as f64).sqrt() as usize - 1) / 2;
+    let side_len = if triforce {
+        realmweave_core::boardgen::tf_side_len(bd.definition())
+    } else {
+        (((8 * per_realm + 1) as f64).sqrt() as usize - 1) / 2
+    };
     // Entry cost with the same anti-ruler medicine as the hex eval:
     // contested empties cost more, and deterministic terrain grain breaks
     // the tie between the many equal-length straight paths — without it
@@ -225,7 +229,7 @@ fn trinity_cost(game: &Game, player: Player) -> i64 {
                 // and the weakest (Y wisdom: edge play loses to cutting).
                 // Charge rim cells extra so routes arc through the interior.
                 let sides = if triforce {
-                    realmweave_core::boardgen::triforce_sides(side_len, node)
+                    realmweave_core::boardgen::triforce_sides(bd.definition(), side_len, node)
                 } else {
                     realmweave_core::boardgen::trinity_sides(side_len, node)
                 };
@@ -246,7 +250,7 @@ fn trinity_cost(game: &Game, player: Player) -> i64 {
             let mut heap = std::collections::BinaryHeap::new();
             for start in lo..hi {
                 let start_sides = if triforce {
-                    realmweave_core::boardgen::triforce_sides(side_len, start)
+                    realmweave_core::boardgen::triforce_sides(bd.definition(), side_len, start)
                 } else {
                     realmweave_core::boardgen::trinity_sides(side_len, start)
                 };
@@ -497,7 +501,11 @@ fn shape_score(game: &Game, me: Player, node: NodeId) -> f64 {
     // lines" bug).
     let is_trinity = def.origins.is_empty();
     const HEX_DIRS: [[i32; 2]; 6] = [[1, 0], [0, 1], [-1, 1], [-1, 0], [0, -1], [1, -1]];
-    const TRI_DIRS: [[i32; 2]; 6] = [[0, 1], [0, -1], [1, 0], [-1, 0], [1, 1], [-1, -1]];
+    // CYCLIC order around a node (same cycle as the pierced-board fans):
+    // adjacent-pair sums then land on true diagonals, which is what the
+    // 尖 term below assumes. A ±pair ordering makes three of the six
+    // "diagonals" degenerate self-offsets and rewards solid contact.
+    const TRI_DIRS: [[i32; 2]; 6] = [[0, -1], [-1, -1], [-1, 0], [0, 1], [1, 1], [1, 0]];
     let dirs: [[i32; 2]; 6] = if is_trinity { TRI_DIRS } else { HEX_DIRS };
     let occ_at = |a: [i32; 2]| -> bool {
         bd.axial_index()
@@ -556,6 +564,33 @@ pub fn choose_move(game: &Game, seed: u64) -> Option<Move> {
     choose_move_with_budget(game, seed, mcts::MctsConfig::default())
 }
 
+/// The pie decision: Swap, the best reply, or None to fall through to the
+/// normal search path (reference construction failed). See the call site
+/// for the calibration rationale.
+///
+/// COST: this one decision runs THREE full-budget searches (~7s at the
+/// Strong 8000-playout preset, measured on tf22). It is the AI's "long
+/// think" on the pie move — deliberate, happens at most once per game.
+fn pie_swap_or_reply(game: &Game, seed: u64, budget: mcts::MctsConfig) -> Option<Move> {
+    const EPS: f64 = 0.02;
+    let (reply, p_keep) = mcts::choose_move_mcts_scored(game, seed, budget)?;
+    // Reference: rewind to the empty board, let this bot pick its own
+    // opening, and measure Dark's value against THAT.
+    let empty = || -> Option<Game> {
+        let board = BoardGraph::new(game.board().definition().clone()).ok()?;
+        Game::replay(board, game.config().clone(), &[]).ok()
+    };
+    let mut reference = empty()?;
+    let (own_open, _) =
+        mcts::choose_move_mcts_scored(&reference, seed.wrapping_add(0x0D1E), budget)?;
+    reference.play(own_open).ok()?;
+    let (_, p_ref) = mcts::choose_move_mcts_scored(&reference, seed, budget)?;
+    if p_keep < p_ref + EPS {
+        return Some(Move::Swap);
+    }
+    game.validate(&reply).is_ok().then_some(reply)
+}
+
 /// Like [`choose_move`] with an explicit MCTS budget (trinity only; other
 /// rulesets use the fixed 2-ply search).
 pub fn choose_move_with_budget(game: &Game, seed: u64, budget: mcts::MctsConfig) -> Option<Move> {
@@ -566,6 +601,20 @@ pub fn choose_move_with_budget(game: &Game, seed: u64, budget: mcts::MctsConfig)
             rules::TRINITY_Y_V4 | rules::TRIFORCE_V5
         )
     {
+        // Pie-rule swap decision (Dark's first response only). Root win
+        // rates from random playouts carry a tempo bias (the side to move
+        // reads high), so no absolute threshold works. Self-calibrate
+        // instead: measure Dark's value after the opponent's actual
+        // opening (p_keep) AND after the opening this bot would itself
+        // have played (p_ref) — same searcher, same budget, same ply, so
+        // the bias cancels. Swap when the human's opening is at least as
+        // strong as the bot's own best (p_keep < p_ref + ε): pie-rule
+        // wisdom is to swap unless the opening is measurably weak.
+        if game.validate(&Move::Swap).is_ok() {
+            if let Some(mv) = pie_swap_or_reply(game, seed, budget) {
+                return Some(mv);
+            }
+        }
         // The simulator plays simple-ko; the engine enforces positional
         // superko. A rules divergence here must never leak to callers: an
         // unplayable "best move" would livelock deterministic retry loops.
@@ -725,6 +774,76 @@ mod tests {
                 "ply {ply}: bot proposed unplayable {mv:?}"
             );
         }
+    }
+
+    fn pie_game(side: usize) -> Game {
+        let def = boardgen::generate_triforce(side).unwrap();
+        let board = BoardGraph::new(def).unwrap();
+        let cfg = GameConfig::new(board.definition().id.clone())
+            .with_ruleset(rules::TRIFORCE_V5)
+            .with_pie_rule(true);
+        Game::new(board, cfg).unwrap()
+    }
+
+    /// The swap branch also serves trinity-y-v4. Trinity has no clearly
+    /// weak first move on small boards (a realm corner touches two of its
+    /// realm's sides; measured values cluster 0.60–0.66 around the bot's
+    /// own 0.646 reference), so per pie wisdom near-equal openings are
+    /// TAKEN. Contract here: the decision is deterministic, and whatever
+    /// the AI returns — Swap or a placement — the engine accepts it and
+    /// the game continues.
+    #[test]
+    fn pie_decision_on_trinity_is_deterministic_and_playable() {
+        let budget = mcts::MctsConfig {
+            playouts: 800,
+            c: 0.9,
+        };
+        for opening in [0u16, 12, 31] {
+            let board = BoardGraph::new(boardgen::generate_trinity(8).unwrap()).unwrap();
+            let cfg = GameConfig::new(board.definition().id.clone())
+                .with_ruleset(rules::TRINITY_Y_V4)
+                .with_pie_rule(true);
+            let mut game = Game::new(board, cfg).unwrap();
+            game.play(Move::Place(opening)).unwrap();
+            let a = choose_move_with_budget(&game, 0xA11CE, budget).unwrap();
+            let b = choose_move_with_budget(&game, 0xA11CE, budget).unwrap();
+            assert_eq!(a, b, "opening {opening}: decision must be deterministic");
+            assert!(
+                game.play(a).is_ok(),
+                "opening {opening}: pie decision {a:?} must be playable"
+            );
+        }
+    }
+
+    /// Pie rule: a heart-center opening is strong (measured: heart-vs-
+    /// corner gap ≥ +15pp), so the AI playing Dark must take it by
+    /// swapping. A worst-possible opening (a corner point) must be left
+    /// alone.
+    #[test]
+    fn pie_swap_takes_strong_openings_and_declines_weak_ones() {
+        let budget = mcts::MctsConfig {
+            playouts: 1500,
+            c: 0.9,
+        };
+        // Strong opening: the heart's central node.
+        let mut strong = pie_game(10);
+        // side 10: heart rows 5..9 interior; row 6 col 4 is deep heart
+        let heart = (6 * 7 / 2 + 4) as realmweave_core::NodeId;
+        assert_eq!(
+            boardgen::triforce_region(strong.board().definition(), 10, heart),
+            3
+        );
+        strong.play(Move::Place(heart)).unwrap();
+        let mv = choose_move_with_budget(&strong, 0xA11CE, budget).unwrap();
+        assert_eq!(mv, Move::Swap, "AI must swap away a heart-center opening");
+
+        // Weak opening: the top corner (touches two sides but connects to
+        // only two neighbors — the classic losing first move).
+        let mut weak = pie_game(10);
+        weak.play(Move::Place(0)).unwrap();
+        let mv = choose_move_with_budget(&weak, 0xA11CE, budget).unwrap();
+        assert_ne!(mv, Move::Swap, "AI must not swap into a corner opening");
+        assert!(weak.play(mv).is_ok());
     }
 }
 

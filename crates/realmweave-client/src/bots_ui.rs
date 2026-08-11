@@ -18,6 +18,7 @@ use realmweave_core::{boardgen, BoardGraph, Game, GameResult, Move, NodeId, Play
 #[derive(Resource, Default)]
 pub(crate) struct BotTask(Option<(u64, crossbeam_channel::Receiver<Option<Move>>)>);
 
+#[allow(clippy::unwrap_used, clippy::expect_used)] // construction-time invariants: generated boards validate (CI-gated), live games replay
 pub(crate) fn bot_turn(
     time: Res<Time>,
     mut think: Local<f32>,
@@ -27,7 +28,9 @@ pub(crate) fn bot_turn(
     budget: Res<AiBudget>,
 ) {
     let s = &mut session.0;
-    let Control::VsBot(human) = s.control else {
+    // Derived, not pattern-matched: a pie swap flips which color the
+    // human plays without mutating Control (see Session::vs_bot_human).
+    let Some(human) = s.vs_bot_human() else {
         *think = 0.0;
         task.0 = None;
         return;
@@ -48,8 +51,22 @@ pub(crate) fn bot_turn(
         return;
     }
 
-    // Poll a computation in flight.
-    let here = realmweave_core::rules::position_hash(s.game.state());
+    // Poll a computation in flight. The tag must identify the DECISION,
+    // not just the stones: position_hash covers occupancy+to_move only, so
+    // mix in ruleset/board identity (a new same-size game after teardown
+    // reuses this Local and an empty board hashes identically across
+    // rulesets), move count, and cut count (undo can restore occupancy
+    // while cut_edges differ).
+    let here = {
+        use std::hash::{Hash, Hasher};
+        let mut h = realmweave_core::rules::StableHasher::default();
+        realmweave_core::rules::position_hash(s.game.state()).hash(&mut h);
+        s.game.config().ruleset_id.hash(&mut h);
+        s.game.board().definition().id.hash(&mut h);
+        (s.game.state().move_log.len() as u64).hash(&mut h);
+        (s.game.state().cut_edges.len() as u64).hash(&mut h);
+        h.finish()
+    };
     if let Some((for_pos, rx)) = &task.0 {
         if *for_pos != here {
             task.0 = None; // stale (game changed under us — incl. undo races)
@@ -58,17 +75,17 @@ pub(crate) fn bot_turn(
                 Ok(mv) => {
                     task.0 = None;
                     // If the engine rejects the move (should be prevented in
-                    // the bot lib), pass rather than silently retrying the
-                    // same deterministic choice forever.
+                    // the bot lib), fall back rather than silently retrying
+                    // the same deterministic choice forever.
                     let played = mv.map(|m| s.game.play(m).is_ok()).unwrap_or(false);
                     if !played {
-                        let _ = s.game.play(realmweave_core::Move::Pass);
+                        bot_gives_up(&mut s.game);
                     }
                 }
                 Err(crossbeam_channel::TryRecvError::Empty) => {}
                 Err(crossbeam_channel::TryRecvError::Disconnected) => {
                     task.0 = None;
-                    let _ = s.game.play(realmweave_core::Move::Pass);
+                    bot_gives_up(&mut s.game);
                 }
             }
             return;
@@ -108,6 +125,17 @@ pub(crate) fn bot_turn(
         );
         let _ = tx.send(mv);
     });
+}
+
+/// Terminal fallback when the bot cannot produce a playable move: Pass
+/// where legal, otherwise Resign. Pass is NOT legal in every ruleset
+/// (classic/sever reject it) — a failed Pass would leave the turn stuck
+/// and bot_turn respawning the same deterministic search every 0.4s
+/// forever behind "AI 思考中…".
+fn bot_gives_up(game: &mut realmweave_core::Game) {
+    if game.play(realmweave_core::Move::Pass).is_err() {
+        let _ = game.play(realmweave_core::Move::Resign);
+    }
 }
 
 /// Tutorial sparring: placements only (never cuts), grown from the bot's
@@ -193,6 +221,7 @@ pub(crate) struct DuelTask(Option<(u64, crossbeam_channel::Receiver<Option<Move>
 /// AI-vs-AI exhibition driver: play one move per `pace` seconds with
 /// narrated reasoning; start the next game when one ends. The search runs
 /// off-thread — 600 playouts ≈ 180ms would otherwise hitch every move.
+#[allow(clippy::unwrap_used, clippy::expect_used)] // construction-time invariants: generated boards validate (CI-gated), live games replay
 pub(crate) fn duel_turn(
     time: Res<Time>,
     mut commands: Commands,
@@ -436,12 +465,18 @@ pub(crate) fn win_reason_name(reason: WinReason) -> &'static str {
 }
 
 /// Duel commentary panel: shows the exhibition's rolling narration.
-pub(crate) fn duel_panel(mut egui_ctx: EguiContexts, duel: Res<Duel>, session: Res<GameSession>) {
-    let ctx = egui_ctx.ctx_mut();
-    egui::SidePanel::right("duel")
+pub(crate) fn duel_panel(
+    mut egui_ctx: EguiContexts,
+    duel: Res<Duel>,
+    hud_height: Res<crate::HudHeight>,
+    session: Res<GameSession>,
+) {
+    let Ok(ctx) = egui_ctx.ctx_mut() else { return };
+    let mut root = crate::hud::root_ui_below(ctx, "duel_root", hud_height.0);
+    egui::Panel::right("duel")
         .resizable(false)
-        .default_width(360.0)
-        .show(ctx, |ui| {
+        .default_size(360.0)
+        .show(&mut root, |ui| {
             ui.add_space(8.0);
             ui.heading(format!(
                 "AI 对弈 · 第 {}/{} 局 · 第 {} 手",

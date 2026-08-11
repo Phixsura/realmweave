@@ -27,7 +27,7 @@ pub(crate) fn apply_replay_cursor(
     mut ui: ResMut<UiState>,
     mut last_cursor: Local<Option<usize>>,
 ) {
-    let Some(replay) = replay else {
+    let Some(mut replay) = replay else {
         *last_cursor = None;
         return;
     };
@@ -40,9 +40,13 @@ pub(crate) fn apply_replay_cursor(
             *last_cursor = Some(replay.0.cursor);
         }
         Err(e) => {
-            // Remember the failed cursor too — otherwise this retries (and
-            // spams status) every frame for the same position.
-            *last_cursor = Some(replay.0.cursor);
+            // Snap the cursor BACK to the last successfully rendered
+            // position: leaving it on the failed index shows "第 k 手"
+            // over a board still rendering position j — a silent desync.
+            // (Also naturally prevents per-frame retry spam.)
+            if let Some(good) = *last_cursor {
+                replay.0.seek(good);
+            }
             ui.status = format!("replay error: {e}");
         }
     }

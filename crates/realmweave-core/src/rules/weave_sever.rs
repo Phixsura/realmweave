@@ -130,7 +130,16 @@ impl WeaveSeverV2 {
         }
         while let Some(cur) = queue.pop_front() {
             for nb in board.live_neighbors(cur, &state.cut_edges) {
-                if !in_net[nb as usize] && state.occupant(nb) == Some(player) {
+                // Traverse THROUGH opponent fossils exactly like the weave
+                // check (live_realm_weave): a weave scored across fossil
+                // roads must petrify the stones BEYOND the fossil segment
+                // too, or that far chain survives as live material and
+                // re-weaves over the same roads — breaking the layers
+                // game's anti-snowball cost. Fossils themselves are
+                // already petrified; only own stones join the network.
+                let mine = state.occupant(nb) == Some(player);
+                let road = state.fossil_road_for(nb, player);
+                if !in_net[nb as usize] && (mine || road) {
                     in_net[nb as usize] = true;
                     queue.push_back(nb);
                 }
@@ -474,8 +483,12 @@ impl RuleSet for WeaveSeverV2 {
             return Ok(next);
         }
 
-        // 4. Full-board endgame (no response turn possible).
-        if Self::board_full(&next) && next.result.is_none() {
+        // 4. Full-board endgame. A full board does NOT mean the opponent
+        // has no answer: CutEdge needs no empty node, so while they hold
+        // scissors the provisional weave must survive the normal
+        // confirmation turn instead of scoring immediately.
+        let opp_can_still_cut = next.scissors[player_index(opp)] > 0;
+        if Self::board_full(&next) && next.result.is_none() && !opp_can_still_cut {
             if next.pending_weave == Some(mover) {
                 // A standing weave the opponent can never answer scores.
                 next.layers[player_index(mover)] += 1;

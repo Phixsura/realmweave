@@ -25,9 +25,16 @@ pub fn permanently_connected(board: &BoardGraph, state: &GameState, player: Play
     let mut queue = VecDeque::new();
     visited[first as usize] = true;
     queue.push_back(first);
+    // Enemy ORIGIN nodes are as permanent as cut edges: nothing in v2/v3
+    // ever vacates an origin (no captures; petrification only converts the
+    // petrifier's own stones). Treating them as traversable both hides
+    // real strangles and lets `cut_self_strangles` approve a cut whose
+    // only surviving "connection" runs through an enemy origin.
+    let enemy_origins: Vec<crate::board::NodeId> = board.definition().origins_of(player.opponent());
     while let Some(cur) = queue.pop_front() {
         for next in board.live_neighbors(cur, &state.cut_edges) {
-            let blocked = state.is_petrified(next) && !state.fossil_road_for(next, player);
+            let blocked = (state.is_petrified(next) && !state.fossil_road_for(next, player))
+                || enemy_origins.contains(&next);
             if !visited[next as usize] && !blocked {
                 visited[next as usize] = true;
                 queue.push_back(next);
@@ -128,11 +135,32 @@ pub fn live_realm_weave(board: &BoardGraph, state: &GameState, player: Player) -
 
 // ------------------------------------------------------------- helpers ---
 
-/// Order-independent hash of the current position: occupancy + to_move.
-/// Used for positional-superko (ko) checks.
+/// FNV-1a, 64-bit: a STABLE hasher for values that get persisted
+/// (position_hashes in serialized game state, board fingerprints in
+/// records). std's DefaultHasher is explicitly unstable across Rust
+/// releases — persisting its output would corrupt archives on upgrade.
+#[derive(Default)]
+pub struct StableHasher(Option<u64>);
+
+impl std::hash::Hasher for StableHasher {
+    fn finish(&self) -> u64 {
+        self.0.unwrap_or(0xcbf2_9ce4_8422_2325)
+    }
+    fn write(&mut self, bytes: &[u8]) {
+        let mut h = self.0.unwrap_or(0xcbf2_9ce4_8422_2325);
+        for &b in bytes {
+            h ^= b as u64;
+            h = h.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+        self.0 = Some(h);
+    }
+}
+
+/// Hash of the current position: occupancy + to_move.
+/// Used for superko checks; stored in GameState, hence the stable hasher.
 pub fn position_hash(state: &GameState) -> u64 {
     use std::hash::{Hash, Hasher};
-    let mut h = std::collections::hash_map::DefaultHasher::new();
+    let mut h = StableHasher::default();
     state.occupancy.hash(&mut h);
     state.to_move.hash(&mut h);
     h.finish()

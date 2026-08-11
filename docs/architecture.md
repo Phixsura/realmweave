@@ -33,7 +33,7 @@ holds app assembly, shared resources, and the system schedule.
 
 ## Dispatch discipline
 
-Two axes of variation, each with ONE authority:
+Each axis of variation has ONE authority:
 
 - **Board family** (`BoardDefinition::family()` → StackedHex /
   SplitTriangles / MergedTriangle): goal geometry, symmetry validation,
@@ -43,6 +43,12 @@ Two axes of variation, each with ONE authority:
   ID comparisons remain legitimate only for genuinely per-ruleset
   presentation (e.g. the flagship's region tinting).
 
+- **Who plays which color** (`Session::vs_bot_human`, derived from
+  `swap_happened()` reading the move log): the engine keeps colors
+  stable on a pie swap — seats exchange OUTSIDE it (server swaps
+  tokens online; vs-AI derives). Never read the color out of
+  `Control::VsBot` directly, never mutate Control to "flip" it —
+  derivation makes undo/replay/reconnect correct for free.
 - **Explicit module imports**: client modules import exactly what they
   use (`use crate::{...}`), never `use crate::*`. Module boundaries are
   compiler-enforced — an unused dependency is a warning, a new one is a
@@ -53,7 +59,7 @@ Two axes of variation, each with ONE authority:
 
 ## Accepted debts (reviewed, deliberate)
 
-- Positional-superko history is a `Vec::contains` linear scan
+- Situational-superko history is a `Vec::contains` linear scan
   (O(moves) per validate); measured ~µs at 250 moves. A HashSet in
   GameState would break serde/replay compatibility for zero felt gain.
 

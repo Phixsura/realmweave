@@ -54,8 +54,14 @@ impl BatchStats {
             .filter(|m| matches!(m, Move::Place(_)))
             .count();
         self.move_counts.push(placements as u32);
+        // Fill = stones ON THE BOARD at game end, not placements made:
+        // capture rulesets refill vacated points, so counting Place moves
+        // overstates density (can exceed 100%) and breaks cross-ruleset
+        // board comparisons.
+        let stones = state.occupancy.iter().filter(|o| o.is_some()).count()
+            - game.board().definition().origins.len();
         let capacity = game.board().node_count() - game.board().definition().origins.len();
-        self.fill_ratios.push(placements as f64 / capacity as f64);
+        self.fill_ratios.push(stones as f64 / capacity as f64);
 
         // Portal usage: fraction of gate nodes occupied at game end.
         let gates = game.board().definition().gate_nodes();
