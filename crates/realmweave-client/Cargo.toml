@@ -4,6 +4,7 @@ description = "Realmweave native game client (Bevy): 3D realms + 2D analysis vie
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+rust-version.workspace = true
 repository.workspace = true
 
 [dependencies]
@@ -13,8 +14,8 @@ realmweave-protocol = { workspace = true }
 realmweave-supplywar = { path = "../realmweave-supplywar", optional = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-bevy = "0.15"
-bevy_egui = "0.31"
+bevy = "0.19"
+bevy_egui = "0.41"
 crossbeam-channel = "0.5"
 tungstenite = "0.26"
 steamworks = { version = "0.11", optional = true }

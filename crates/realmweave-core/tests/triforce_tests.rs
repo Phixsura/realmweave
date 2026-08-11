@@ -18,7 +18,7 @@ fn boards_validate_and_regions_partition() {
         let n = def.nodes.len();
         let mut counts = [0usize; 4];
         for id in 0..n as u16 {
-            counts[boardgen::triforce_region(side, id)] += 1;
+            counts[boardgen::triforce_region(&def, side, id)] += 1;
         }
         assert_eq!(counts.iter().sum::<usize>(), n);
         // three realms equal-sized; heart smaller
@@ -133,4 +133,147 @@ fn replay_reproduces_state() {
     let b = BoardGraph::new(boardgen::generate_triforce(8).unwrap()).unwrap();
     let replayed = Game::replay(b, game.config().clone(), &game.state().move_log).unwrap();
     assert_eq!(replayed.state(), game.state());
+}
+
+// ------------------------------------------------------------ pierced ---
+
+#[test]
+fn pierced_boards_validate_with_triangular_faces() {
+    for side in [22usize, 26, 30, 40] {
+        let def = boardgen::generate_triforce_pierced(side).unwrap();
+        assert_eq!(def.id, format!("tf{side}-v5p"));
+        realmweave_core::validate_board(&def).unwrap();
+        let solid = boardgen::generate_triforce(side).unwrap();
+        assert_eq!(def.nodes.len(), solid.nodes.len() - 6);
+        // All internal faces triangular: for a planar triangulated disc,
+        // T = E - V + 1 and 3T = 2E - B (B = boundary cycle length).
+        let v = def.nodes.len() as i64;
+        let e = def.edges.len() as i64;
+        let b = 3 * (side as i64 - 1);
+        assert_eq!((2 * e - b) % 3, 0, "side {side}: face equation");
+        assert_eq!((2 * e - b) / 3, e - v + 1, "side {side}: non-triangle face");
+    }
+}
+
+#[test]
+fn pierced_rotation_is_an_automorphism() {
+    // The validator checks the mirror; check a 120° rotation here so the
+    // deletion orbit + fan chords are confirmed fully S3-symmetric.
+    let side = 22usize;
+    let def = boardgen::generate_triforce_pierced(side).unwrap();
+    let s = side as i32 - 1;
+    // (r, c) -> barycentric (u, v, w) = (s - r, c, r - c); rotation is the
+    // cyclic shift (u, v, w) -> (w, u, v); back to (r, c) = (s - u', v').
+    let rot = |r: i32, c: i32| -> [i32; 2] {
+        let (u, v, w) = (s - r, c, r - c);
+        let (u2, v2) = (w, u);
+        let _ = v;
+        [s - u2, v2]
+    };
+    let index: std::collections::HashMap<[i32; 2], u16> =
+        def.nodes.iter().map(|n| (n.axial.unwrap(), n.id)).collect();
+    let map: Vec<u16> = def
+        .nodes
+        .iter()
+        .map(|n| {
+            let [r, c] = n.axial.unwrap();
+            *index.get(&rot(r, c)).expect("rotation image exists")
+        })
+        .collect();
+    let edge_set: std::collections::HashSet<(u16, u16)> = def
+        .edges
+        .iter()
+        .map(|e| (e.a.min(e.b), e.a.max(e.b)))
+        .collect();
+    for e in &def.edges {
+        let (a, b) = (map[e.a as usize], map[e.b as usize]);
+        assert!(
+            edge_set.contains(&(a.min(b), a.max(b))),
+            "rotated edge {}-{} missing",
+            e.a,
+            e.b
+        );
+    }
+}
+
+#[test]
+fn pierced_region_and_sides_survive_renumbering() {
+    let side = 22usize;
+    let def = boardgen::generate_triforce_pierced(side).unwrap();
+    assert_eq!(boardgen::tf_side_len(&def), side);
+    let mut counts = [0usize; 4];
+    for n in &def.nodes {
+        counts[boardgen::triforce_region(&def, side, n.id)] += 1;
+    }
+    assert_eq!(counts.iter().sum::<usize>(), def.nodes.len());
+    assert_eq!(counts[0], counts[1]);
+    assert_eq!(counts[1], counts[2]);
+    // heart lost exactly the 6 deleted nodes
+    let solid = boardgen::generate_triforce(side).unwrap();
+    let mut solid_counts = [0usize; 4];
+    for n in &solid.nodes {
+        solid_counts[boardgen::triforce_region(&solid, side, n.id)] += 1;
+    }
+    assert_eq!(counts[3] + 6, solid_counts[3]);
+    // side masks: corners touch two sides, bottom row touches bottom
+    let corner_top = def.nodes.iter().find(|n| n.axial == Some([0, 0])).unwrap();
+    assert_eq!(boardgen::triforce_sides(&def, side, corner_top.id), 3);
+    let br = def
+        .nodes
+        .iter()
+        .find(|n| n.axial == Some([side as i32 - 1, 3]))
+        .unwrap();
+    assert_eq!(boardgen::triforce_sides(&def, side, br.id), 4);
+}
+
+#[test]
+fn pierced_game_plays_and_y_wins() {
+    let def = boardgen::generate_triforce_pierced(22).unwrap();
+    let b = BoardGraph::new(def).unwrap();
+    let config = GameConfig::new(b.definition().id.clone()).with_ruleset(TRIFORCE_V5);
+    let mut game = Game::new(b, config).unwrap();
+    // Bottom row is intact (holes are interior): claim it for a Y while
+    // Dark answers in the top corner.
+    let side = 22i32;
+    let bottom: Vec<u16> = game
+        .board()
+        .definition()
+        .nodes
+        .iter()
+        .filter(|n| n.axial.unwrap()[0] == side - 1)
+        .map(|n| n.id)
+        .collect();
+    let dark: Vec<u16> = game
+        .board()
+        .definition()
+        .nodes
+        .iter()
+        .filter(|n| n.axial.unwrap()[0] < 6)
+        .map(|n| n.id)
+        .collect();
+    for (i, &n) in bottom.iter().enumerate() {
+        game.play(Move::Place(n)).unwrap();
+        if game.result().is_some() {
+            break;
+        }
+        game.play(Move::Place(dark[i])).unwrap();
+    }
+    assert_eq!(
+        game.result(),
+        Some(realmweave_core::GameResult::Win {
+            player: Player::Light,
+            reason: realmweave_core::WinReason::RealmWeave
+        })
+    );
+}
+
+#[test]
+fn pierced_resolves_and_unsupported_sides_refuse() {
+    assert!(boardgen::resolve("tf22-v5p").is_some());
+    assert!(boardgen::resolve("tf26-v5p").is_some());
+    assert!(boardgen::generate_triforce_pierced(20).is_none()); // heart too small
+    assert!(boardgen::generate_triforce_pierced(23).is_none()); // odd
+    let p = boardgen::resolve("tf22-v5p").unwrap();
+    let s = boardgen::resolve("tf22-v5").unwrap();
+    assert_ne!(p.fingerprint(), s.fingerprint());
 }

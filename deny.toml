@@ -2,6 +2,17 @@
 [advisories]
 version = 2
 yanked = "deny"
+ignore = [
+  # steamworks is an OPTIONAL feature (not in default builds); the P2P
+  # auth DoS applies to shipped Steam builds only. Revisit before the
+  # Steam release milestone (issue #6).
+  "RUSTSEC-2026-0121", # steamworks P2P auth DoS
+  # ttf-parser (via owned_ttf_parser <- ab_glyph <- sctk-adwaita): winit's
+  # LINUX WAYLAND fallback titlebar decorations only — not in the render
+  # path on any platform, not compiled on macOS/Windows. Unmaintained-only
+  # advisory; drop when winit/sctk-adwaita migrate off ab_glyph.
+  "RUSTSEC-2026-0192", # ttf-parser 0.25 (Linux Wayland decorations)
+]
 
 [licenses]
 version = 2
@@ -17,7 +28,10 @@ allow = [
   "BSL-1.0",
   "CC0-1.0",
   "Unicode-3.0",
-  "Unicode-DFS-2016",
-  "OFL-1.1",
-  "Ubuntu-font-1.0",
 ]
+
+# egui's default font pack: OFL-licensed faces used only by this crate,
+# so the allowance is scoped here instead of the global list.
+[[licenses.exceptions]]
+name = "epaint_default_fonts"
+allow = ["MIT", "Apache-2.0", "OFL-1.1", "Ubuntu-font-1.0"]

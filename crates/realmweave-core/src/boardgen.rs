@@ -549,6 +549,9 @@ pub fn resolve(board_id: &str) -> Option<BoardDefinition> {
         }
     }
     if let Some(rest) = board_id.strip_prefix("tf") {
+        if let Some(side) = rest.strip_suffix("-v5p").and_then(|s| s.parse().ok()) {
+            return generate_triforce_pierced(side);
+        }
         if let Some(side) = rest.strip_suffix("-v5").and_then(|s| s.parse().ok()) {
             return generate_triforce(side);
         }
@@ -579,7 +582,7 @@ pub fn generate_triforce(side: usize) -> Option<BoardDefinition> {
     for r in 0..side {
         for c in 0..=r {
             let id = index(r, c);
-            let realm = match triforce_region(side, id) {
+            let realm = match tf_region_rc(side, r, c) {
                 0 => Realm::Heaven,
                 1 => Realm::Mortal,
                 2 => Realm::Underworld,
@@ -623,12 +626,22 @@ pub fn generate_triforce(side: usize) -> Option<BoardDefinition> {
     })
 }
 
-/// Region of a triforce node: 0 = Heaven (top corner), 1 = Mortal (left),
-/// 2 = Underworld (right), 3 = the weave-heart (central inverted triangle).
-pub fn triforce_region(side: usize, node: NodeId) -> usize {
-    let local = node as usize;
-    let r = ((((8 * local + 1) as f64).sqrt() - 1.0) / 2.0) as usize;
-    let c = local - r * (r + 1) / 2;
+/// Big-triangle side length of a merged-triangle board: the deepest axial
+/// row + 1. Works for solid (v5) AND pierced (v5p) boards, where the node
+/// count no longer matches the triangular-number formula. Compute once per
+/// scope; O(n).
+pub fn tf_side_len(def: &BoardDefinition) -> usize {
+    def.nodes
+        .iter()
+        .filter_map(|n| n.axial)
+        .map(|a| a[0] as usize)
+        .max()
+        .map_or(0, |m| m + 1)
+}
+
+/// Region from a (row, col) coordinate: 0 = Heaven (top corner),
+/// 1 = Mortal (left), 2 = Underworld (right), 3 = the weave-heart.
+fn tf_region_rc(side: usize, r: usize, c: usize) -> usize {
     let h = side / 2;
     if r < h {
         return 0;
@@ -643,12 +656,20 @@ pub fn triforce_region(side: usize, node: NodeId) -> usize {
     3
 }
 
+/// Region of a triforce node, read from its axial coordinate — the single
+/// authority for solid and pierced boards alike (`side` from
+/// [`tf_side_len`]): 0 = Heaven, 1 = Mortal, 2 = Underworld, 3 = heart.
+pub fn triforce_region(def: &BoardDefinition, side: usize, node: NodeId) -> usize {
+    let [r, c] = def.nodes[node as usize].axial.unwrap_or([0, 0]);
+    tf_region_rc(side, r as usize, c as usize)
+}
+
 /// Which sides of the BIG triangle a triforce node lies on (bitmask:
-/// 1 = left, 2 = right, 4 = bottom). Same convention as `trinity_sides`.
-pub fn triforce_sides(side: usize, node: NodeId) -> u8 {
-    let local = node as usize;
-    let r = ((((8 * local + 1) as f64).sqrt() - 1.0) / 2.0) as usize;
-    let c = local - r * (r + 1) / 2;
+/// 1 = left, 2 = right, 4 = bottom). Same convention as `trinity_sides`;
+/// axial-based like [`triforce_region`].
+pub fn triforce_sides(def: &BoardDefinition, side: usize, node: NodeId) -> u8 {
+    let [r, c] = def.nodes[node as usize].axial.unwrap_or([0, 0]);
+    let (r, c) = (r as usize, c as usize);
     let mut mask = 0u8;
     if c == 0 {
         mask |= 1;
@@ -660,4 +681,184 @@ pub fn triforce_sides(side: usize, node: NodeId) -> u8 {
         mask |= 4;
     }
     mask
+}
+
+// ------------------------------------------------------------- pierced ---
+
+/// Hexagonal lattice distance between two (row, col) triangle coordinates.
+fn tri_dist(a: (usize, usize), b: (usize, usize)) -> usize {
+    let (a1, b1) = (a.0 as i64 - a.1 as i64, a.1 as i64);
+    let (a2, b2) = (b.0 as i64 - b.1 as i64, b.1 as i64);
+    let (da, db) = (a1 - a2, b1 - b2);
+    ((da.abs() + db.abs() + (da + db).abs()) / 2) as usize
+}
+
+/// The canonical S3-symmetric deletion orbit for a pierced board: six
+/// deep-interior heart nodes closed under the triangle's full symmetry
+/// group, pairwise lattice distance >= 2 (holes never share a ring node's
+/// edge), chosen deterministically (max min-distance, then lexicographic).
+/// None when the heart is too small to host one (side < 22).
+fn pierced_orbit(side: usize) -> Option<[(usize, usize); 6]> {
+    let in_tri = |r: i64, c: i64| r >= 0 && (r as usize) < side && c >= 0 && c <= r;
+    let neigh = |r: usize, c: usize| -> [(i64, i64); 6] {
+        let (r, c) = (r as i64, c as i64);
+        [
+            (r, c - 1),
+            (r, c + 1),
+            (r - 1, c - 1),
+            (r - 1, c),
+            (r + 1, c),
+            (r + 1, c + 1),
+        ]
+    };
+    // Deep-interior heart nodes: heart-region cells all of whose lattice
+    // neighbors exist and are heart cells too.
+    let deep: Vec<(usize, usize)> = (0..side)
+        .flat_map(|r| (0..=r).map(move |c| (r, c)))
+        .filter(|&(r, c)| {
+            tf_region_rc(side, r, c) == 3
+                && neigh(r, c).iter().all(|&(nr, nc)| {
+                    in_tri(nr, nc) && tf_region_rc(side, nr as usize, nc as usize) == 3
+                })
+        })
+        .collect();
+    // Full S3 orbit of a cell via barycentric (u, v, w) permutations.
+    let orbit_of = |(r, c): (usize, usize)| -> Vec<(usize, usize)> {
+        let (u, v, w) = (side - 1 - r, c, r - c);
+        let mut pts: Vec<(usize, usize)> = [
+            (u, v, w),
+            (u, w, v),
+            (v, u, w),
+            (v, w, u),
+            (w, u, v),
+            (w, v, u),
+        ]
+        .iter()
+        .map(|&(a, b, _)| (side - 1 - a, b))
+        .collect();
+        pts.sort_unstable();
+        pts.dedup();
+        pts
+    };
+    let mut best: Option<(usize, Vec<(usize, usize)>)> = None;
+    for &p in &deep {
+        let orbit = orbit_of(p);
+        if orbit.len() != 6 || !orbit.iter().all(|q| deep.contains(q)) {
+            continue;
+        }
+        let mut min_d = usize::MAX;
+        for i in 0..6 {
+            for j in i + 1..6 {
+                min_d = min_d.min(tri_dist(orbit[i], orbit[j]));
+            }
+        }
+        if min_d < 2 {
+            continue;
+        }
+        let better = match &best {
+            None => true,
+            Some((bd, bo)) => min_d > *bd || (min_d == *bd && orbit < *bo),
+        };
+        if better {
+            best = Some((min_d, orbit));
+        }
+    }
+    best.map(|(_, o)| {
+        let mut arr = [(0, 0); 6];
+        arr.copy_from_slice(&o);
+        arr
+    })
+}
+
+/// v5p "pierced Triforce": the v5 merged triangle with six weave-heart
+/// nodes removed (the canonical S3-symmetric orbit) and each hexagonal
+/// hole re-triangulated by a fan from its outermost ring node. This is the
+/// documented counter-measure to flat-Y center dominance: fewer heart
+/// nodes, lower connectivity through the middle, every internal face still
+/// a triangle so the Y theorem (no draws) is untouched. Sides: even
+/// 22..=40 (smaller hearts cannot host the orbit). Id: `tf{side}-v5p`.
+#[allow(clippy::expect_used)] // generator-internal invariants; tests cover every side
+pub fn generate_triforce_pierced(side: usize) -> Option<BoardDefinition> {
+    if !(22..=40).contains(&side) || !side.is_multiple_of(2) {
+        return None;
+    }
+    let solid = generate_triforce(side)?;
+    let deleted = pierced_orbit(side)?;
+    let is_deleted = |r: usize, c: usize| deleted.iter().any(|&(dr, dc)| (dr, dc) == (r, c));
+
+    // Renumber survivors densely, preserving row-major order.
+    let mut new_id = vec![None::<NodeId>; solid.nodes.len()];
+    let mut nodes = Vec::new();
+    for node in &solid.nodes {
+        let [r, c] = node.axial.expect("triforce nodes carry axial");
+        if is_deleted(r as usize, c as usize) {
+            continue;
+        }
+        let id = nodes.len() as NodeId;
+        new_id[node.id as usize] = Some(id);
+        nodes.push(Node { id, ..node.clone() });
+    }
+    let mut edges: Vec<Edge> = solid
+        .edges
+        .iter()
+        .filter_map(|e| {
+            Some(Edge {
+                a: new_id[e.a as usize]?,
+                b: new_id[e.b as usize]?,
+                kind: e.kind,
+            })
+        })
+        .collect();
+
+    // Re-triangulate each hexagonal hole: fan from the ring node farthest
+    // from the board centroid (unique for every canonical orbit — checked
+    // by the generator tests), which keeps mirror AND 120°-rotation maps
+    // automorphisms because distance-to-centroid is symmetry-invariant.
+    let centroid = {
+        let n = solid.nodes.len() as f32;
+        let (sx, sz) = solid.nodes.iter().fold((0.0, 0.0), |(x, z), nd| {
+            (x + nd.position[0], z + nd.position[2])
+        });
+        (sx / n, sz / n)
+    };
+    let old_index = |r: usize, c: usize| -> NodeId { (r * (r + 1) / 2 + c) as NodeId };
+    for &(r, c) in &deleted {
+        // Ring in cyclic order around the hole.
+        let ring_rc = [
+            (r, c - 1),
+            (r - 1, c - 1),
+            (r - 1, c),
+            (r, c + 1),
+            (r + 1, c + 1),
+            (r + 1, c),
+        ];
+        let ring: Vec<NodeId> = ring_rc
+            .iter()
+            .map(|&(rr, cc)| new_id[old_index(rr, cc) as usize].expect("ring survives"))
+            .collect();
+        let apex = (0..6)
+            .max_by(|&i, &j| {
+                let d = |k: usize| {
+                    let p = &nodes[ring[k] as usize].position;
+                    let (dx, dz) = (p[0] - centroid.0, p[2] - centroid.1);
+                    dx * dx + dz * dz
+                };
+                d(i).partial_cmp(&d(j)).expect("finite positions")
+            })
+            .expect("six ring nodes");
+        for k in [2usize, 3, 4] {
+            edges.push(Edge {
+                a: ring[apex],
+                b: ring[(apex + k) % 6],
+                kind: EdgeKind::IntraRealm,
+            });
+        }
+    }
+    Some(BoardDefinition {
+        id: format!("tf{side}-v5p"),
+        version: 1,
+        nodes,
+        edges,
+        origins: Vec::new(),
+    })
 }
