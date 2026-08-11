@@ -58,6 +58,8 @@ jobs:
       - name: tests
         run: cargo test --workspace
       - name: validate shipped boards
+        # bash everywhere: pwsh (Windows default) passes the glob literally
+        shell: bash
         run: cargo run -p realmweave-cli -- validate boards/*.json
       - name: shipped boards match their generators
         if: runner.os == 'Linux'
