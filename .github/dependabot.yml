@@ -1,0 +1,17 @@
+# Keeps the SHA-pinned actions in .github/workflows/* current. Dependabot
+# bumps both the commit SHA and the trailing `# vX.Y.Z` comment in one
+# reviewable PR, so pins stay immutable AND readable.
+#
+# (Cargo deps are intentionally not auto-updated here — the Bevy 0.15→0.16
+# jump is a deliberate migration, not a bump; add a `cargo` ecosystem
+# entry after that upgrade if desired.)
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: ci

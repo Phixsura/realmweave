@@ -83,7 +83,10 @@ impl<'a> Sim<'a> {
             SimMode::Trinity => n / 3,
             SimMode::Triforce => n, // one realm spanning the whole board
         };
-        let side = (((8 * per_realm + 1) as f64).sqrt() as usize - 1) / 2;
+        let side = match mode {
+            SimMode::Trinity => (((8 * per_realm + 1) as f64).sqrt() as usize - 1) / 2,
+            SimMode::Triforce => boardgen::tf_side_len(board.definition()),
+        };
         let st = game.state();
         let mut sim = Sim {
             board,
@@ -115,7 +118,7 @@ impl<'a> Sim<'a> {
     fn sides_of(&self, node: NodeId) -> u8 {
         match self.mode {
             SimMode::Trinity => boardgen::trinity_sides(self.side, node),
-            SimMode::Triforce => boardgen::triforce_sides(self.side, node),
+            SimMode::Triforce => boardgen::triforce_sides(self.board.definition(), self.side, node),
         }
     }
 
@@ -388,6 +391,14 @@ struct NodeStats {
 /// Choose a trinity move by UCT search. Returns None on positions with no
 /// legal placement (caller falls back to Pass).
 pub fn choose_move_mcts(game: &Game, seed: u64, config: MctsConfig) -> Option<Move> {
+    choose_move_mcts_scored(game, seed, config).map(|(mv, _)| mv)
+}
+
+/// Like [`choose_move_mcts`], also returning the chosen move's estimated
+/// win rate for the side to move (its root visit-average). Drives the
+/// pie-rule swap decision: compare the best placement's win rate against
+/// the position's value after swapping.
+pub fn choose_move_mcts_scored(game: &Game, seed: u64, config: MctsConfig) -> Option<(Move, f64)> {
     let root = Sim::from_game(game);
     let me = root.to_move;
     let board_id = game.board().definition().id.clone();
@@ -412,7 +423,8 @@ pub fn choose_move_mcts(game: &Game, seed: u64, config: MctsConfig) -> Option<Mo
         return None;
     }
     if cands.len() == 1 {
-        return Some(Move::Place(cands[0]));
+        // No search ran; 0.5 = "no information", not a confident estimate.
+        return Some((Move::Place(cands[0]), 0.5));
     }
     let n = game.board().node_count();
     let mut scratch = Scratch {
@@ -464,8 +476,12 @@ pub fn choose_move_mcts(game: &Game, seed: u64, config: MctsConfig) -> Option<Mo
         }
         total += 1;
     }
-    stats
-        .iter()
-        .max_by_key(|s| s.visits)
-        .map(|s| Move::Place(s.mv))
+    stats.iter().max_by_key(|s| s.visits).map(|s| {
+        let rate = if s.visits > 0 {
+            s.wins / s.visits as f64
+        } else {
+            0.5
+        };
+        (Move::Place(s.mv), rate)
+    })
 }

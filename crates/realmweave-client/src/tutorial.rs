@@ -79,8 +79,7 @@ impl TutorialState {
 
     /// Side length of the tutorial board (one merged triangle).
     fn side(game: &Game) -> usize {
-        let n = game.board().node_count();
-        (((8 * n + 1) as f64).sqrt() as usize - 1) / 2
+        boardgen::tf_side_len(game.board().definition())
     }
 
     /// Max number of distinct sides touched by any single human group.
@@ -97,12 +96,12 @@ impl TutorialState {
             }
             let mut stack = vec![start];
             visited[start as usize] = true;
-            let mut mask = boardgen::triforce_sides(side, start);
+            let mut mask = boardgen::triforce_sides(bd.definition(), side, start);
             while let Some(cur) = stack.pop() {
                 for &nb in bd.neighbors(cur) {
                     if !visited[nb as usize] && st.occupant(nb) == Some(self.human) {
                         visited[nb as usize] = true;
-                        mask |= boardgen::triforce_sides(side, nb);
+                        mask |= boardgen::triforce_sides(bd.definition(), side, nb);
                         stack.push(nb);
                     }
                 }
@@ -249,7 +248,9 @@ impl TutorialState {
             Step::Welcome | Step::FirstStone => {
                 // pulse the weave-heart: center play beats edge crawling
                 for node in 0..n as NodeId {
-                    if boardgen::triforce_region(side, node) == 3 && st.occupant(node).is_none() {
+                    if boardgen::triforce_region(bd.definition(), side, node) == 3
+                        && st.occupant(node).is_none()
+                    {
                         h.nodes.push(node);
                     }
                 }
@@ -257,7 +258,9 @@ impl TutorialState {
             Step::TouchTwoSides => {
                 // pulse empty side nodes of the big triangle
                 for node in 0..n as NodeId {
-                    if boardgen::triforce_sides(side, node) != 0 && st.occupant(node).is_none() {
+                    if boardgen::triforce_sides(bd.definition(), side, node) != 0
+                        && st.occupant(node).is_none()
+                    {
                         h.nodes.push(node);
                     }
                 }

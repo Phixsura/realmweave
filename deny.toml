@@ -2,6 +2,18 @@
 [advisories]
 version = 2
 yanked = "deny"
+ignore = [
+  # Bevy 0.15's font stack (cosmic-text -> rustybuzz/ttf-parser) and
+  # wgpu's metal backend (paste). Unmaintained-only advisories; fixed
+  # upstream in Bevy 0.16+ — drop these when the engine is upgraded.
+  "RUSTSEC-2024-0436", # paste (via wgpu-hal/metal)
+  "RUSTSEC-2026-0192", # ttf-parser 0.20 (via cosmic-text)
+  "RUSTSEC-2026-0206", # rustybuzz (via cosmic-text)
+  # steamworks is an OPTIONAL feature (not in default builds); the P2P
+  # auth DoS applies to shipped Steam builds only. Revisit before the
+  # Steam release milestone.
+  "RUSTSEC-2026-0121", # steamworks P2P auth DoS
+]
 
 [licenses]
 version = 2
@@ -21,3 +33,9 @@ allow = [
   "OFL-1.1",
   "Ubuntu-font-1.0",
 ]
+
+# egui's default font pack ships one Ubuntu-font-licensed face under a
+# LicenseRef spelling the allow-list cannot express globally.
+[[licenses.exceptions]]
+name = "epaint_default_fonts"
+allow = ["LicenseRef-UFL-1.0", "MIT", "Apache-2.0", "OFL-1.1"]

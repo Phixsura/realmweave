@@ -4,6 +4,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)] // offline tooling: fail fast is correct
 mod annotate;
 mod bots;
+mod center;
 mod fairness;
 mod mcts;
 mod stats;
@@ -79,6 +80,20 @@ enum Command {
         seed: u64,
         #[arg(long, default_value_t = 400)]
         playouts: u32,
+    },
+    /// Measure center dominance on a triforce board: forced-opening win
+    /// rates + free-game heart occupancy, judged against fixed criteria.
+    Center {
+        #[arg(long)]
+        board: PathBuf,
+        /// Games per forced opening (and free games for occupancy).
+        #[arg(long, default_value_t = 12)]
+        games: u32,
+        /// Engine MCTS playouts per move.
+        #[arg(long, default_value_t = 2000)]
+        playouts: u32,
+        #[arg(long, default_value_t = 42)]
+        seed: u64,
     },
     /// Graph-level fairness analysis of a board definition.
     Fairness {
@@ -317,6 +332,22 @@ fn run(cli: Cli) -> Result<(), String> {
                 stats_a.summary(&format!("[A] {}", a.definition().id))
             );
             println!("{}", stats_b.summary(&format!("[B] {}", b.definition().id)));
+            Ok(())
+        }
+        Command::Center {
+            board,
+            games,
+            playouts,
+            seed,
+        } => {
+            let graph = load(&board)?;
+            if graph.definition().family() != realmweave_core::BoardFamily::MergedTriangle {
+                return Err(format!(
+                    "{} is not a merged-triangle (triforce) board",
+                    graph.definition().id
+                ));
+            }
+            print!("{}", center::report(&graph, games, playouts, seed));
             Ok(())
         }
         Command::Fairness { board } => {

@@ -1,3 +1,13 @@
+# CI — quality gates modeled on the attune repo's conventions:
+#   * Actions pinned to a full commit SHA with a trailing `# vX.Y.Z` comment;
+#     .github/dependabot.yml bumps both together weekly.
+#   * Every workflow declares least-privilege `permissions:`; checkouts use
+#     `persist-credentials: false`.
+#   * `concurrency` cancels superseded runs on the same ref.
+#   * `ci-gate` is an `if: always()` aggregator and is the ONLY job that
+#     should be marked "required" in branch protection. The gate fails iff
+#     a real job failed/cancelled/skipped.
+
 name: CI
 
 on:
@@ -5,21 +15,32 @@ on:
     branches: [main]
   pull_request:
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
   check:
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # stable branch (v1 tag)
+        with:
+          toolchain: stable
           components: rustfmt, clippy
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       # Bevy native build dependencies (Linux only).
       - name: Install system dependencies
         if: runner.os == 'Linux'
@@ -38,6 +59,21 @@ jobs:
         run: cargo test --workspace
       - name: validate shipped boards
         run: cargo run -p realmweave-cli -- validate boards/*.json
+      - name: shipped boards match their generators
+        if: runner.os == 'Linux'
+        run: |
+          for f in boards/*.json; do
+            id="$(basename "$f" .json)"
+            case "$id" in
+              tf*-v5p) side="${id#tf}"; side="${side%-v5p}"; args="--triforce $side --pierced" ;;
+              tf*-v5)  side="${id#tf}"; side="${side%-v5}";  args="--triforce $side" ;;
+              tri*-v4) side="${id#tri}"; side="${side%-v4}"; args="--trinity $side" ;;
+              hex*-v1) size="${id#hex}"; size="${size%-v1}"; args="--size $size" ;;
+              *) echo "::error::unknown board family: $id"; exit 1 ;;
+            esac
+            cargo run -q -p realmweave-cli -- gen-board $args -o "/tmp/$id.json"
+            diff "/tmp/$id.json" "$f" || { echo "::error::$f drifted from its generator"; exit 1; }
+          done
       - name: bench compiles (no run)
         if: runner.os == 'Linux'
         run: cargo bench -p realmweave-core --bench engine --no-run
@@ -45,9 +81,13 @@ jobs:
   release-build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # stable branch (v1 tag)
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - name: Install system dependencies
         run: |
           sudo apt-get update
@@ -59,7 +99,58 @@ jobs:
   deny:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: EmbarkStudios/cargo-deny-action@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
         with:
           command: check advisories licenses
+
+  # ── lizard: complexity gate (CCN > 15 or NLOC > 100 fails) ───────────────
+  # whitelizard.txt grandfathers the functions that predate the gate; the
+  # list only shrinks. New/edited functions must stay under the thresholds.
+  lizard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.13"
+      - run: pip install lizard==1.23.0
+      - run: lizard crates -l rust -C 15 -T nloc=100 --warnings_only -W whitelizard.txt
+
+  # ── jscpd: code duplication gate (config in .jscpd.json) ─────────────────
+  jscpd:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22
+      - run: npx -y jscpd crates --silent
+
+  # ── Required-check aggregator (the ONLY job to mark "required") ──────────
+  ci-gate:
+    needs: [check, release-build, deny, lizard, jscpd]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify no required job failed
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "upstream results: $RESULTS"
+          bad=0
+          for r in $RESULTS; do
+            case "$r" in
+              success) ;;
+              skipped) echo "::error::a required job was skipped"; bad=1 ;;
+              *) echo "::error::a required job concluded '$r'"; bad=1 ;;
+            esac
+          done
+          if [ "$bad" -ne 0 ]; then exit 1; fi
+          echo "All required jobs passed."

@@ -52,6 +52,23 @@ pub(crate) fn menu_ui(
             ) {
                 ui.small("（三角棋盘尺寸由此行间接决定：越大越长局）");
             }
+            if ui_state.ruleset == realmweave_core::TRIFORCE_V5 {
+                // Pierced hearts need a triangle side >= 22 (91×3 pick and up):
+                // smaller hearts cannot host the symmetric deletion orbit.
+                let side_ok = ui_state.board_size >= 91;
+                if !side_ok {
+                    ui_state.pierced_heart = false;
+                }
+                ui.add_enabled(
+                    side_ok,
+                    egui::Checkbox::new(
+                        &mut ui_state.pierced_heart,
+                        "空心织心 (v5p：心区挖孔，稀释中心)",
+                    ),
+                )
+                .on_hover_text("移除六个织心节点并重新连边——针对平面 Y 类棋中心过强的对策")
+                .on_disabled_hover_text("需要 91×3 以上尺寸（更小的织心容不下对称挖孔）");
+            }
             ui.checkbox(&mut ui_state.pie_rule, "pie rule (second player may swap)");
             ui.horizontal(|ui| {
                 ui.label("rules");
@@ -126,6 +143,7 @@ pub(crate) fn menu_ui(
                         ui_state.pie_rule,
                         &ui_state.ruleset.clone(),
                         ui_state.world_seed,
+                        ui_state.pierced_heart,
                         None,
                     );
                 }
@@ -138,6 +156,7 @@ pub(crate) fn menu_ui(
                             ui_state.pie_rule,
                             &ui_state.ruleset.clone(),
                             ui_state.world_seed,
+                            ui_state.pierced_heart,
                             Some(Player::Light),
                         );
                     }
@@ -149,6 +168,7 @@ pub(crate) fn menu_ui(
                             ui_state.pie_rule,
                             &ui_state.ruleset.clone(),
                             ui_state.world_seed,
+                            ui_state.pierced_heart,
                             Some(Player::Dark),
                         );
                     }
@@ -175,7 +195,11 @@ pub(crate) fn menu_ui(
                     .clicked()
             {
                 let def = if ui_state.ruleset == realmweave_core::TRIFORCE_V5 {
-                    boardgen::generate_triforce(22).expect("triforce board")
+                    if ui_state.pierced_heart {
+                        boardgen::generate_triforce_pierced(22).expect("pierced board")
+                    } else {
+                        boardgen::generate_triforce(22).expect("triforce board")
+                    }
                 } else if ui_state.ruleset == realmweave_core::TRINITY_Y_V4 {
                     boardgen::generate_trinity(14).expect("trinity board")
                 } else {
@@ -213,6 +237,7 @@ pub(crate) fn menu_ui(
                     false,
                     realmweave_core::TRIFORCE_V5,
                     0,
+                    false, // tutorial always uses the solid board
                     Some(Player::Light),
                 );
                 commands.insert_resource(Tutorial(tutorial::TutorialState::new()));
@@ -267,6 +292,7 @@ pub(crate) fn start_hotseat(
     pie: bool,
     ruleset: &str,
     world_seed: u64,
+    pierced: bool,
     human_vs_bot: Option<Player>,
 ) {
     let prev_addr = crate::settings::load()
@@ -287,7 +313,12 @@ pub(crate) fn start_hotseat(
             91 => 22,
             _ => 26,
         };
-        boardgen::generate_triforce(side).expect("triforce board")
+        if pierced {
+            // menu disables the checkbox below side 22; expect is the backstop
+            boardgen::generate_triforce_pierced(side).expect("pierced board")
+        } else {
+            boardgen::generate_triforce(side).expect("triforce board")
+        }
     } else if ruleset == realmweave_core::TRINITY_Y_V4 {
         // triangle side from the hex size pick: 19→8, 37→11, 61→14, 91→16, 127→19
         let side = match size {
@@ -323,7 +354,11 @@ pub(crate) fn start_online_create(commands: &mut Commands, ui: &mut UiState) {
     });
     let handle = net::connect(&ui.server_addr);
     let board_id = if ui.ruleset == realmweave_core::TRIFORCE_V5 {
-        "tf22-v5".to_string()
+        if ui.pierced_heart {
+            "tf22-v5p".to_string()
+        } else {
+            "tf22-v5".to_string()
+        }
     } else if ui.ruleset == realmweave_core::TRINITY_Y_V4 {
         "tri14-v4".to_string()
     } else {

@@ -33,6 +33,10 @@ enum Command {
         /// even side length.
         #[arg(long)]
         triforce: Option<usize>,
+        /// With --triforce: pierce the weave-heart (v5p variant, six nodes
+        /// removed; even side 22..=40).
+        #[arg(long, requires = "triforce")]
+        pierced: bool,
         /// Portal layout.
         #[arg(long, default_value = "inner6-outer6")]
         portals: String,
@@ -91,12 +95,20 @@ fn run(cli: Cli) -> Result<(), String> {
             size,
             trinity,
             triforce,
+            pierced,
             portals,
             output,
         } => {
             if let Some(side) = triforce {
-                let def = boardgen::generate_triforce(side)
-                    .ok_or_else(|| format!("unsupported triforce side {side}; use even 8..=40"))?;
+                let def = if pierced {
+                    boardgen::generate_triforce_pierced(side).ok_or_else(|| {
+                        format!("unsupported pierced side {side}; use even 22..=40")
+                    })?
+                } else {
+                    boardgen::generate_triforce(side).ok_or_else(|| {
+                        format!("unsupported triforce side {side}; use even 8..=40")
+                    })?
+                };
                 validate_board(&def)
                     .map_err(|e| format!("generated board failed validation: {e}"))?;
                 let json = serde_json::to_string_pretty(&def).map_err(|e| e.to_string())?;

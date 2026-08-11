@@ -1,0 +1,38 @@
+# CodeQL — semantic security analysis for the Rust workspace. Findings land
+# in Security → Code scanning. Rust extraction is build-free (build-mode:
+# none), so Bevy's heavy native build never runs here.
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "37 3 * * 1" # weekly catch-all (Mon 03:37 UTC)
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: Analyze (rust)
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@5595ccaf912efad79be6eef63a5619ff05969be3 # v4
+        with:
+          languages: rust
+          build-mode: none
+          queries: security-and-quality
+      - name: Analyze
+        uses: github/codeql-action/analyze@5595ccaf912efad79be6eef63a5619ff05969be3 # v4
+        with:
+          category: "/language:rust"
