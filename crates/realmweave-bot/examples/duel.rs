@@ -1,5 +1,6 @@
 //! Engine-vs-engine exhibition: same seed on the solid and pierced boards.
 //! Usage: duel <board-id> <seed> <playouts> <out.json>
+#![allow(clippy::unwrap_used, clippy::expect_used)] // offline example: fail fast
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let (board_id, seed, playouts, out) = (
