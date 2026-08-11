@@ -69,9 +69,12 @@ jobs:
           Copy-Item -Recurse boards dist/realmweave/boards
           Copy-Item docs/rules.md,README.md,LICENSE dist/realmweave/
           Compress-Archive -Path dist/realmweave -DestinationPath "realmweave-$env:REF_NAME-${{ matrix.target }}.zip"
+      # `gh release` instead of a third-party action (zizmor: superfluous-actions).
       - name: Upload to release
-        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
-        with:
-          files: |
-            realmweave-*.tar.gz
-            realmweave-*.zip
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REF_NAME: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          gh release create "$REF_NAME" --verify-tag --generate-notes || true
+          gh release upload "$REF_NAME" realmweave-*.tar.gz realmweave-*.zip --clobber
