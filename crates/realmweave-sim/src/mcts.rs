@@ -32,6 +32,12 @@ struct Node {
 }
 
 impl Bot for MctsBot {
+    // The UCT tree explores Swap as a root move, and the engine route
+    // runs the production pie decision — either way this bot decides.
+    fn handles_pie(&self) -> bool {
+        true
+    }
+
     fn choose(&mut self, game: &Game) -> Option<Move> {
         // Y-family boards: delegate to the production engine (fast Sim,
         // ~1s/move at 3000 playouts). This tree keeps full Game clones and

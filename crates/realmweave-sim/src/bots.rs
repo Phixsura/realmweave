@@ -7,6 +7,12 @@ use rand::Rng;
 use realmweave_core::{Game, Move, NodeId, Player};
 
 pub trait Bot {
+    /// Whether this bot makes its own pie-rule swap decision (the batch
+    /// runner must then NOT pre-empt it with the rollout estimator).
+    fn handles_pie(&self) -> bool {
+        false
+    }
+
     fn choose(&mut self, game: &Game) -> Option<Move>;
 }
 

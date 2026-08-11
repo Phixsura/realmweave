@@ -215,11 +215,17 @@ fn run_batch(board: &BoardGraph, opts: &BatchOptions) -> Result<BatchStats, Stri
         let mut pie_rng = StdRng::seed_from_u64(opts.seed.wrapping_add(g as u64).wrapping_mul(31));
 
         while game.result().is_none() {
-            // Pie decision on Dark's first response.
+            // Pie decision on Dark's first response. Bots that decide the
+            // swap themselves (MCTS) are left alone — pre-empting them
+            // here would let the bot ALSO swap later with the person
+            // bookkeeping already closed, silently corrupting per-person
+            // stats. The rollout estimator only stands in for bots with
+            // no pie judgment of their own (random/greedy).
             if opts.pie
                 && !swapped
                 && game.state().ply == 1
                 && game.legal_moves().contains(&Move::Swap)
+                && !dark.handles_pie()
             {
                 let light_wr = estimate_light_winrate(&game, 40, &mut pie_rng);
                 if light_wr > 0.5 {
@@ -237,6 +243,12 @@ fn run_batch(board: &BoardGraph, opts: &BatchOptions) -> Result<BatchStats, Stri
             };
             let Some(mv) = bot.choose(&game) else { break };
             game.play(mv).map_err(|e| e.to_string())?;
+            if mv == Move::Swap {
+                // The bot exercised the pie rule itself: same seat
+                // exchange as the estimator path.
+                person_a_plays = Player::Dark;
+                swapped = true;
+            }
         }
         if g == 0 {
             if let Some(path) = opts.record {
