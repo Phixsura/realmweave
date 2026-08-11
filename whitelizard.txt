@@ -1,7 +1,10 @@
 # Complexity-gate ratchet (lizard -C 15 -T nloc=100). These functions
 # exceeded the thresholds when the gate was introduced (2026-08-11) and
 # are grandfathered — the gate stops NEW complexity, the list only
-# shrinks. Format: path:function.
+# shrinks. Format: path:function. NOTE: lizard matches on the FUNCTION
+# NAME only (the path prefix is documentation, not a constraint), so a
+# short grandfathered name like `run` or `main` also shields future
+# same-named functions — prefer distinctive names for new complex code.
 crates/realmweave-bot/src/lib.rs:candidates
 crates/realmweave-bot/src/lib.rs:choose_move_with_budget
 crates/realmweave-bot/src/lib.rs:trinity_cost
