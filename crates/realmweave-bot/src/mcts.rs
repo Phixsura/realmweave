@@ -184,29 +184,8 @@ impl<'a> Sim<'a> {
             // would have given us a liberty), so nothing to undo.
             return false;
         }
-        // Simple ko: single capture by a LONE stone that itself sits in
-        // atari (exactly one liberty — the captured point). Without the
-        // liberty check this also bans legal snapback recaptures (lone
-        // capturer with 2+ liberties), systematically misevaluating
-        // capture races in every playout.
         self.ko_point = if captured_total == 1 {
-            let mut libs = 0;
-            let mut lone = true;
-            for &nb in self.board.neighbors(node) {
-                match self.occ[nb as usize] {
-                    None => libs += 1,
-                    Some(p) if p == me => {
-                        lone = false;
-                        break;
-                    }
-                    _ => {}
-                }
-            }
-            if lone && libs == 1 {
-                last_captured
-            } else {
-                None
-            }
+            self.ko_after_single_capture(node, me, last_captured)
         } else {
             None
         };
@@ -220,6 +199,28 @@ impl<'a> Sim<'a> {
         }
         self.to_move = me.opponent();
         true
+    }
+
+    /// Simple ko: a single capture by a LONE stone that itself sits in
+    /// atari (exactly one liberty — the captured point). Without the
+    /// liberty check this also bans legal snapback recaptures (lone
+    /// capturer with 2+ liberties), systematically misevaluating capture
+    /// races in every playout.
+    fn ko_after_single_capture(
+        &self,
+        node: NodeId,
+        me: Player,
+        last_captured: Option<NodeId>,
+    ) -> Option<NodeId> {
+        let mut libs = 0;
+        for &nb in self.board.neighbors(node) {
+            match self.occ[nb as usize] {
+                None => libs += 1,
+                Some(p) if p == me => return None, // not lone
+                _ => {}
+            }
+        }
+        (libs == 1).then_some(last_captured).flatten()
     }
 
     fn update_match_winner(&mut self) {

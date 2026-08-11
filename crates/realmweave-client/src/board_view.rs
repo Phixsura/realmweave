@@ -103,7 +103,11 @@ pub(crate) fn orbit_camera(
     mut motion: MessageReader<MouseMotion>,
     mut wheel: MessageReader<MouseWheel>,
     mut egui_ctx: EguiContexts,
+    mut drag: ResMut<crate::DragGuard>,
 ) {
+    if buttons.just_pressed(MouseButton::Left) {
+        drag.0 = 0.0;
+    }
     let over_ui = egui_ctx
         .ctx_mut()
         .map(|c| c.egui_wants_pointer_input())
@@ -121,6 +125,9 @@ pub(crate) fn orbit_camera(
             || (buttons.pressed(MouseButton::Left) && !buttons.just_pressed(MouseButton::Left))
         {
             rotate += ev.delta;
+            if buttons.pressed(MouseButton::Left) {
+                drag.0 += ev.delta.length();
+            }
         }
         if buttons.pressed(MouseButton::Middle) {
             pan += ev.delta;
@@ -275,8 +282,12 @@ pub(crate) fn sync_board_visuals(
                     move |_trigger: On<Pointer<Click>>,
                           mut events: MessageWriter<IntentEvent>,
                           mut view: ResMut<ViewSettings>,
+                          drag: Res<crate::DragGuard>,
                           session: Res<GameSession>| {
                         let s = &session.0;
+                        if drag.0 > 6.0 {
+                            return; // that was a camera drag, not a click
+                        }
                         if view.review_cursor.is_some() {
                             return; // review mode is read-only
                         }

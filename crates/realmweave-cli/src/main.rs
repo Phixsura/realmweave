@@ -23,7 +23,7 @@ enum Command {
     /// Generate a standard three-realm hex board definition.
     GenBoard {
         /// Nodes per realm: 19, 37, 61, 91, or 127 (hex boards).
-        #[arg(long, conflicts_with = "trinity")]
+        #[arg(long, conflicts_with_all = ["trinity", "triforce"])]
         size: Option<usize>,
         /// Generate a trinity (triangular side-goal) board with this side
         /// length instead of a hex board.
@@ -265,12 +265,21 @@ fn run(cli: Cli) -> Result<(), String> {
                 Some(result) => println!("result: {result:?}"),
                 None => println!("game in progress; {} to move", game.to_move().name()),
             }
-            if rec.result != game.result() {
-                return Err(format!(
-                    "record result {:?} does not match replayed result {:?}",
-                    rec.result,
-                    game.result()
-                ));
+            // Server-adjudicated endings (timeout, off-turn resignation)
+            // are deliberately NOT in the move log — the engine cannot
+            // produce them — so a record result the replay lacks is only a
+            // contradiction when the replayed game reached a DIFFERENT
+            // result, not when it reached none.
+            match (&rec.result, game.result()) {
+                (Some(recorded), Some(replayed)) if *recorded != replayed => {
+                    return Err(format!(
+                        "record result {recorded:?} contradicts replayed result {replayed:?}"
+                    ));
+                }
+                (Some(recorded), None) => {
+                    println!("server-adjudicated ending: {recorded:?} (not derivable from moves)");
+                }
+                _ => {}
             }
             Ok(())
         }

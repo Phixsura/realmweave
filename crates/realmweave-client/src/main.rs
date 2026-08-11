@@ -75,6 +75,7 @@ fn main() {
         .init_resource::<LocalClocks>()
         .init_resource::<ViewSettings>()
         .init_resource::<HudHeight>()
+        .init_resource::<DragGuard>()
         .add_message::<IntentEvent>()
         .add_systems(Startup, (setup_camera, setup_cjk_font))
         .add_systems(
@@ -216,6 +217,13 @@ struct IntentEvent(PlayerIntent);
 /// below it (per-system egui roots don't reserve space from each other).
 #[derive(Resource, Default)]
 struct HudHeight(f32);
+
+/// Cumulative left-button drag distance (px) since the button went down.
+/// Bevy picking fires Click on press+release over the same entity even
+/// after a long camera-orbit drag — node observers ignore clicks that
+/// were really drags.
+#[derive(Resource, Default)]
+struct DragGuard(f32);
 
 /// Local per-side elapsed thinking time (seconds), for the HUD.
 #[derive(Resource, Default)]

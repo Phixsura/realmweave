@@ -180,7 +180,16 @@ async fn handle_socket(state: Shared, socket: WebSocket) {
     // for connection-level messages (room events carry their own seq inside).
     let mut out_seq: u64 = 0;
     let writer = tokio::spawn(async move {
+        // Slow-reader guard: a client that stops reading its socket stalls
+        // `ws_tx.send` here while the room keeps pushing ClockUpdates into
+        // the unbounded queue — unbounded heap growth per hostile socket.
+        // A healthy client is never thousands of messages behind; drop it.
+        const MAX_QUEUED: usize = 4096;
         while let Some(msg) = rx.recv().await {
+            if rx.len() > MAX_QUEUED {
+                tracing::warn!("outbound queue overflow; dropping slow connection");
+                break;
+            }
             out_seq += 1;
             let frame = encode(&Envelope::new(out_seq, msg));
             if ws_tx.send(Message::Text(frame.into())).await.is_err() {
@@ -246,31 +255,37 @@ async fn handle_socket(state: Shared, socket: WebSocket) {
         }
     }
 
-    // Disconnect: mark the seat as away and notify the opponent. Compare
-    // channel IDENTITY, not just the token: a half-dead socket's teardown
-    // can fire after the same player already reconnected on a new socket,
-    // and clearing the fresh channel would silently disconnect the live
-    // connection (every broadcast dropped until the next reconnect).
-    if let Some(Session { room, token }) = session {
-        let mut room = room.lock().await;
-        room.last_activity = std::time::Instant::now();
-        if let Some(seat) = room.seat_of_token(&token) {
-            let is_this_connection = room
-                .seat_mut(seat)
-                .and_then(|s| s.tx.as_ref())
-                .is_some_and(|t| t.same_channel(&tx));
-            if is_this_connection {
-                if let Some(s) = room.seat_mut(seat) {
-                    s.tx = None;
-                }
-                room.send_to(
-                    seat.opponent(),
-                    ServerMessage::OpponentConnection { connected: false },
-                );
-            }
-        }
-    }
+    disconnect_seat(session, &tx).await;
     writer.abort();
+}
+
+/// Mark the seat as away and notify the opponent. Compares channel
+/// IDENTITY, not just the token: a half-dead socket's teardown can fire
+/// after the same player already reconnected on a new socket, and
+/// clearing the fresh channel would silently disconnect the live
+/// connection (every broadcast dropped until the next reconnect).
+async fn disconnect_seat(session: Option<Session>, tx: &mpsc::UnboundedSender<ServerMessage>) {
+    let Some(Session { room, token }) = session else {
+        return;
+    };
+    let mut room = room.lock().await;
+    room.last_activity = std::time::Instant::now();
+    let Some(seat) = room.seat_of_token(&token) else {
+        return;
+    };
+    let is_this_connection = room
+        .seat_mut(seat)
+        .and_then(|s| s.tx.as_ref())
+        .is_some_and(|t| t.same_channel(tx));
+    if is_this_connection {
+        if let Some(s) = room.seat_mut(seat) {
+            s.tx = None;
+        }
+        room.send_to(
+            seat.opponent(),
+            ServerMessage::OpponentConnection { connected: false },
+        );
+    }
 }
 
 async fn handle_message(
@@ -288,6 +303,18 @@ async fn handle_message(
             if session.is_some() {
                 let _ = tx.send(ServerMessage::Error {
                     reason: "already seated".into(),
+                });
+                return;
+            }
+            // Global room cap: the per-connection rate limit does not stop
+            // an attacker opening N sockets and creating one room each —
+            // every room is heap state AND a permanent SQLite games row.
+            // Legitimate concurrent-room counts are tiny; the cap is a DoS
+            // backstop, not a product limit.
+            const MAX_LIVE_ROOMS: usize = 1024;
+            if state.rooms.lock().await.len() >= MAX_LIVE_ROOMS {
+                let _ = tx.send(ServerMessage::Error {
+                    reason: "server is at capacity, try again later".into(),
                 });
                 return;
             }
@@ -562,7 +589,14 @@ async fn play(
             }
             let result = room.result();
             room.last_activity = std::time::Instant::now();
-            room.broadcast(ServerMessage::MoveAccepted(event));
+            // Server adjudications are NOT moves: broadcasting a fake
+            // MoveAccepted{Resign} tempts clients to feed it through the
+            // engine, which attributes the resignation to the WRONG player
+            // (the winner). GameEnded below is the authoritative message;
+            // it is all an adjudication needs.
+            if engine_move {
+                room.broadcast(ServerMessage::MoveAccepted(event));
+            }
             if let Some(result) = result {
                 let clock = room.clock();
                 room.broadcast(ServerMessage::GameEnded { result, clock });
