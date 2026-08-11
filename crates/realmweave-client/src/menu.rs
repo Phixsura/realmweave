@@ -53,8 +53,21 @@ pub(crate) fn menu_ui(
                 ui.small("（三角棋盘尺寸由此行间接决定：越大越长局）");
             }
             if ui_state.ruleset == realmweave_core::TRIFORCE_V5 {
-                ui.checkbox(&mut ui_state.pierced_heart, "空心织心 (v5p：心区挖孔，稀释中心)")
-                    .on_hover_text("移除六个织心节点并重新连边——针对平面 Y 类棋中心过强的对策。需要 91×3 以上尺寸。");
+                // Pierced hearts need a triangle side >= 22 (91×3 pick and up):
+                // smaller hearts cannot host the symmetric deletion orbit.
+                let side_ok = ui_state.board_size >= 91;
+                if !side_ok {
+                    ui_state.pierced_heart = false;
+                }
+                ui.add_enabled(
+                    side_ok,
+                    egui::Checkbox::new(
+                        &mut ui_state.pierced_heart,
+                        "空心织心 (v5p：心区挖孔，稀释中心)",
+                    ),
+                )
+                .on_hover_text("移除六个织心节点并重新连边——针对平面 Y 类棋中心过强的对策")
+                .on_disabled_hover_text("需要 91×3 以上尺寸（更小的织心容不下对称挖孔）");
             }
             ui.checkbox(&mut ui_state.pie_rule, "pie rule (second player may swap)");
             ui.horizontal(|ui| {
@@ -301,8 +314,8 @@ pub(crate) fn start_hotseat(
             _ => 26,
         };
         if pierced {
-            // pierced hearts need side >= 22; fall back gracefully below
-            boardgen::generate_triforce_pierced(side.max(22)).expect("pierced board")
+            // menu disables the checkbox below side 22; expect is the backstop
+            boardgen::generate_triforce_pierced(side).expect("pierced board")
         } else {
             boardgen::generate_triforce(side).expect("triforce board")
         }

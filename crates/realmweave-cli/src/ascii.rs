@@ -183,7 +183,9 @@ fn render_triforce(game: &Game) -> String {
                         }
                     }
                 },
-                None => '?',
+                // Coordinate not on the board: a pierced hole (v5p). Render
+                // as a gap — the hollow heart should LOOK hollow.
+                None => ' ',
             };
             out.push(ch);
             out.push(' ');

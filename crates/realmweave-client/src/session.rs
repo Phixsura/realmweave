@@ -81,13 +81,35 @@ impl Session {
         self.server_result.or(self.game.result())
     }
 
+    /// Did this game's pie swap actually happen? The engine keeps colors
+    /// stable on Swap (seats exchange OUTSIDE the engine), and Swap can
+    /// only ever be move index 1 — so this is a pure derivation from the
+    /// log. Derivation, not mutation: undo, replay, and reconnect all
+    /// stay correct for free.
+    pub fn swap_happened(&self) -> bool {
+        matches!(self.game.state().move_log.get(1), Some(Move::Swap))
+    }
+
+    /// The color the human currently plays in VsBot mode — the color
+    /// picked at session start, flipped if the pie swap happened. The
+    /// single authority: never read the color out of `Control::VsBot`
+    /// directly.
+    pub fn vs_bot_human(&self) -> Option<Player> {
+        match self.control {
+            Control::VsBot(p) if self.swap_happened() => Some(p.opponent()),
+            Control::VsBot(p) => Some(p),
+            _ => None,
+        }
+    }
+
     pub fn is_my_turn(&self) -> bool {
         if self.result().is_some() {
             return false;
         }
         match self.control {
             Control::HotSeat => true,
-            Control::Seat(p) | Control::VsBot(p) => self.game.to_move() == p,
+            Control::VsBot(_) => Some(self.game.to_move()) == self.vs_bot_human(),
+            Control::Seat(p) => self.game.to_move() == p,
             Control::Observer | Control::BotDuel => false,
         }
     }
@@ -115,14 +137,16 @@ impl Session {
     }
 
     /// Human-readable description of move `index` in the log.
-    /// Light moves first and turns strictly alternate (Pass and Swap
-    /// included), so move-index parity identifies the mover.
+    /// Light moves first and turns alternate — EXCEPT Swap, which keeps
+    /// the mover (Dark swaps, then Dark places): parity inverts for every
+    /// move after a swap.
     pub fn describe_move(&self, index: usize) -> String {
         let st = self.game.state();
         let Some(mv) = st.move_log.get(index) else {
             return String::new();
         };
-        let mover = if index.is_multiple_of(2) {
+        let flipped = self.swap_happened() && index >= 2;
+        let mover = if index.is_multiple_of(2) != flipped {
             Player::Light
         } else {
             Player::Dark
@@ -208,14 +232,8 @@ impl Session {
         if let PlayerIntent::Undo = intent {
             // vs-AI: rewind to the human's previous decision point (undo
             // the AI's reply too). Hot-seat: one move.
-            let times = match self.control {
-                Control::VsBot(human) => {
-                    if self.game.to_move() == human {
-                        2
-                    } else {
-                        1
-                    }
-                }
+            let times = match self.vs_bot_human() {
+                Some(human) if self.game.to_move() == human => 2,
                 _ => 1,
             };
             for _ in 0..times {
@@ -247,5 +265,64 @@ impl Session {
             // Mirror divergence — should be impossible; surface loudly.
             self.last_error = Some(format!("state desync: {e}"));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+    use super::*;
+    use realmweave_core::boardgen;
+
+    fn vs_bot_pie_game() -> Session {
+        let def = boardgen::generate_triforce(10).unwrap();
+        let board = BoardGraph::new(def).unwrap();
+        let mut s = Session::hotseat_with_rules(board, true, realmweave_core::TRIFORCE_V5);
+        s.control = Control::VsBot(Player::Light); // human plays Light
+        s
+    }
+
+    /// After the AI (Dark) swaps, the human plays Dark: seat exchange is
+    /// derived from the log, so undo restores it automatically.
+    #[test]
+    fn pie_swap_flips_the_vs_bot_seat_and_undo_restores_it() {
+        let mut s = vs_bot_pie_game();
+        assert_eq!(s.vs_bot_human(), Some(Player::Light));
+        s.game.play(Move::Place(26)).unwrap(); // human's strong opening
+        assert!(!s.is_my_turn(), "Dark (AI) to move");
+        s.game.play(Move::Swap).unwrap(); // AI takes it
+        assert!(s.swap_happened());
+        assert_eq!(
+            s.vs_bot_human(),
+            Some(Player::Dark),
+            "swap hands the opening stone (Light) to the AI"
+        );
+        // Engine keeps to_move = Dark after Swap; Dark is now the HUMAN.
+        assert!(s.is_my_turn(), "human (now Dark) places next");
+        s.game.undo().unwrap(); // pop the Swap
+        assert_eq!(
+            s.vs_bot_human(),
+            Some(Player::Light),
+            "derivation rewinds with the log"
+        );
+    }
+
+    /// Swap keeps the mover, so log parity inverts after it. Index 2 is
+    /// Dark's placement, not Light's.
+    #[test]
+    fn describe_move_attributes_movers_correctly_across_a_swap() {
+        let mut s = vs_bot_pie_game();
+        s.game.play(Move::Place(26)).unwrap(); // 0: Light
+        s.game.play(Move::Swap).unwrap(); // 1: Dark (swap)
+        s.game.play(Move::Place(30)).unwrap(); // 2: Dark places
+        s.game.play(Move::Place(31)).unwrap(); // 3: Light replies
+        assert!(s.describe_move(0).starts_with(Player::Light.name()));
+        assert!(s.describe_move(2).starts_with(Player::Dark.name()));
+        assert!(s.describe_move(3).starts_with(Player::Light.name()));
+        // Without a swap, plain alternation still holds.
+        let mut p = vs_bot_pie_game();
+        p.game.play(Move::Place(26)).unwrap();
+        p.game.play(Move::Place(30)).unwrap();
+        assert!(p.describe_move(1).starts_with(Player::Dark.name()));
     }
 }

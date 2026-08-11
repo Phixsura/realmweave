@@ -250,8 +250,16 @@ pub(crate) fn game_hud(
         ui.horizontal(|ui| {
             match &s.connection {
                 Connection::Local => match s.control {
-                    Control::VsBot(human) => {
-                        ui.label(format!("人机对战 — 你执{}", human.name()));
+                    Control::VsBot(_) => {
+                        // Derived color: a pie swap hands the human the
+                        // other side without touching Control.
+                        let human = s.vs_bot_human().unwrap_or(Player::Light);
+                        let swapped = if s.swap_happened() {
+                            "（已换边）"
+                        } else {
+                            ""
+                        };
+                        ui.label(format!("人机对战 — 你执{}{swapped}", human.name()));
                         if s.result().is_none() && s.game.to_move() != human {
                             ui.colored_label(egui::Color32::YELLOW, "AI 思考中…");
                         }

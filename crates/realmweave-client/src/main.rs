@@ -51,7 +51,7 @@ fn main() {
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
                 title: "Realmweave".to_string(),
-                resolution: (1280.0, 800.0).into(),
+                resolution: (1280.0f32, 800.0f32).into(),
                 ..default()
             }),
             ..default()

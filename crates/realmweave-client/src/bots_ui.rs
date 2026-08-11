@@ -27,7 +27,9 @@ pub(crate) fn bot_turn(
     budget: Res<AiBudget>,
 ) {
     let s = &mut session.0;
-    let Control::VsBot(human) = s.control else {
+    // Derived, not pattern-matched: a pie swap flips which color the
+    // human plays without mutating Control (see Session::vs_bot_human).
+    let Some(human) = s.vs_bot_human() else {
         *think = 0.0;
         task.0 = None;
         return;

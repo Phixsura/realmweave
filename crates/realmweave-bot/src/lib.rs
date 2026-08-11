@@ -563,6 +563,10 @@ pub fn choose_move(game: &Game, seed: u64) -> Option<Move> {
 /// The pie decision: Swap, the best reply, or None to fall through to the
 /// normal search path (reference construction failed). See the call site
 /// for the calibration rationale.
+///
+/// COST: this one decision runs THREE full-budget searches (~7s at the
+/// Strong 8000-playout preset, measured on tf22). It is the AI's "long
+/// think" on the pie move — deliberate, happens at most once per game.
 fn pie_swap_or_reply(game: &Game, seed: u64, budget: mcts::MctsConfig) -> Option<Move> {
     const EPS: f64 = 0.02;
     let (reply, p_keep) = mcts::choose_move_mcts_scored(game, seed, budget)?;
@@ -775,6 +779,36 @@ mod tests {
             .with_ruleset(rules::TRIFORCE_V5)
             .with_pie_rule(true);
         Game::new(board, cfg).unwrap()
+    }
+
+    /// The swap branch also serves trinity-y-v4. Trinity has no clearly
+    /// weak first move on small boards (a realm corner touches two of its
+    /// realm's sides; measured values cluster 0.60–0.66 around the bot's
+    /// own 0.646 reference), so per pie wisdom near-equal openings are
+    /// TAKEN. Contract here: the decision is deterministic, and whatever
+    /// the AI returns — Swap or a placement — the engine accepts it and
+    /// the game continues.
+    #[test]
+    fn pie_decision_on_trinity_is_deterministic_and_playable() {
+        let budget = mcts::MctsConfig {
+            playouts: 800,
+            c: 0.9,
+        };
+        for opening in [0u16, 12, 31] {
+            let board = BoardGraph::new(boardgen::generate_trinity(8).unwrap()).unwrap();
+            let cfg = GameConfig::new(board.definition().id.clone())
+                .with_ruleset(rules::TRINITY_Y_V4)
+                .with_pie_rule(true);
+            let mut game = Game::new(board, cfg).unwrap();
+            game.play(Move::Place(opening)).unwrap();
+            let a = choose_move_with_budget(&game, 0xA11CE, budget).unwrap();
+            let b = choose_move_with_budget(&game, 0xA11CE, budget).unwrap();
+            assert_eq!(a, b, "opening {opening}: decision must be deterministic");
+            assert!(
+                game.play(a).is_ok(),
+                "opening {opening}: pie decision {a:?} must be playable"
+            );
+        }
     }
 
     /// Pie rule: a heart-center opening is strong (measured: heart-vs-
