@@ -81,15 +81,19 @@ impl Game {
             });
         }
         let ruleset = rules::ruleset_by_id(&config.ruleset_id, config.pie_rule)?;
-        // Ruleset/board compatibility: trinity plays side-goal triangle
-        // boards (no origins); every other ruleset needs origins. A
-        // mismatch produces silent nonsense games, so reject it here.
-        let has_origins = !board.definition().origins.is_empty();
-        let wants_origins = !matches!(
-            config.ruleset_id.as_str(),
-            rules::TRINITY_Y_V4 | rules::TRIFORCE_V5
-        );
-        if has_origins != wants_origins {
+        // Ruleset/board compatibility, by board FAMILY (not just origin
+        // presence): trinity and triforce boards both lack origins, but
+        // their geometry functions index differently — trinity rules on a
+        // merged-triangle board (or vice versa) compute garbage realm
+        // partitions and bogus wins. A mismatch produces silent nonsense
+        // games, so reject it here.
+        let family = board.definition().family();
+        let wanted = match config.ruleset_id.as_str() {
+            rules::TRINITY_Y_V4 => crate::board::BoardFamily::SplitTriangles,
+            rules::TRIFORCE_V5 => crate::board::BoardFamily::MergedTriangle,
+            _ => crate::board::BoardFamily::StackedHex,
+        };
+        if family != wanted {
             return Err(GameError::IncompatibleBoard {
                 ruleset: config.ruleset_id.clone(),
                 board: board.definition().id.clone(),

@@ -2,6 +2,7 @@
 //!
 //! Renders the void/light fields and translates clicks into field Commands.
 //! The sim is realmweave_supplywar::field (pure logic, Bevy-free).
+#![allow(clippy::unwrap_used, clippy::expect_used)] // archived lab UI: fail-fast like the lab sim
 
 use bevy::input::mouse::MouseWheel;
 use bevy::prelude::*;

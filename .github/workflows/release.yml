@@ -54,7 +54,8 @@ jobs:
           cp target/${{ matrix.target }}/release/realmweave-client dist/realmweave/
           cp target/${{ matrix.target }}/release/realmweave-server dist/realmweave/
           cp target/${{ matrix.target }}/release/realmweave-cli dist/realmweave/
-          cp -r boards docs/rules.md README.md LICENSE dist/realmweave/
+          cp -r boards README.md LICENSE dist/realmweave/
+          mkdir -p dist/realmweave/docs && cp docs/rules.md dist/realmweave/docs/
           tar czf "realmweave-${REF_NAME}-${{ matrix.target }}.tar.gz" -C dist realmweave
       - name: Package (windows)
         if: matrix.archive == 'zip'
@@ -67,7 +68,9 @@ jobs:
           Copy-Item target/${{ matrix.target }}/release/realmweave-server.exe dist/realmweave/
           Copy-Item target/${{ matrix.target }}/release/realmweave-cli.exe dist/realmweave/
           Copy-Item -Recurse boards dist/realmweave/boards
-          Copy-Item docs/rules.md,README.md,LICENSE dist/realmweave/
+          Copy-Item README.md,LICENSE dist/realmweave/
+          New-Item -ItemType Directory -Force -Path dist/realmweave/docs | Out-Null
+          Copy-Item docs/rules.md dist/realmweave/docs/
           Compress-Archive -Path dist/realmweave -DestinationPath "realmweave-$env:REF_NAME-${{ matrix.target }}.zip"
       # `gh release` instead of a third-party action (zizmor: superfluous-actions).
       - name: Upload to release
@@ -76,5 +79,16 @@ jobs:
           REF_NAME: ${{ github.ref_name }}
         shell: bash
         run: |
-          gh release create "$REF_NAME" --verify-tag --generate-notes || true
-          gh release upload "$REF_NAME" realmweave-*.tar.gz realmweave-*.zip --clobber
+          # Idempotent create: only swallow the expected already-exists race
+          # between matrix legs, never a real failure.
+          if ! gh release view "$REF_NAME" > /dev/null 2>&1; then
+            gh release create "$REF_NAME" --verify-tag --generate-notes
+          fi
+          # nullglob: each leg produces ONE archive type; without it bash
+          # passes the unmatched literal glob to gh, failing every leg.
+          shopt -s nullglob
+          files=(realmweave-*.tar.gz realmweave-*.zip)
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "::error::no artifacts to upload"; exit 1
+          fi
+          gh release upload "$REF_NAME" "${files[@]}" --clobber

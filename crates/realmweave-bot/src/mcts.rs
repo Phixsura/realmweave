@@ -184,14 +184,25 @@ impl<'a> Sim<'a> {
             // would have given us a liberty), so nothing to undo.
             return false;
         }
-        // simple ko: exactly one stone captured and the capturer is a lone stone
+        // Simple ko: single capture by a LONE stone that itself sits in
+        // atari (exactly one liberty — the captured point). Without the
+        // liberty check this also bans legal snapback recaptures (lone
+        // capturer with 2+ liberties), systematically misevaluating
+        // capture races in every playout.
         self.ko_point = if captured_total == 1 {
-            let lone = self
-                .board
-                .neighbors(node)
-                .iter()
-                .all(|&nb| self.occ[nb as usize] != Some(me));
-            if lone {
+            let mut libs = 0;
+            let mut lone = true;
+            for &nb in self.board.neighbors(node) {
+                match self.occ[nb as usize] {
+                    None => libs += 1,
+                    Some(p) if p == me => {
+                        lone = false;
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+            if lone && libs == 1 {
                 last_captured
             } else {
                 None
@@ -361,7 +372,21 @@ impl<'a> Sim<'a> {
         match l.cmp(&d) {
             std::cmp::Ordering::Greater => Player::Light,
             std::cmp::Ordering::Less => Player::Dark,
-            std::cmp::Ordering::Equal => self.to_move.opponent(), // tempo tiebreak
+            // Undecided at the cap: a COIN FLIP, not a tempo rule. The
+            // move cap is even, so "to_move.opponent()" resolved every
+            // truncated playout from a given node to the SAME side —
+            // systematic credit for a position nobody evaluated. Noise is
+            // honest; parity is a thumb on the scale.
+            std::cmp::Ordering::Equal => {
+                *rng ^= *rng << 13;
+                *rng ^= *rng >> 7;
+                *rng ^= *rng << 17;
+                if *rng & 1 == 0 {
+                    Player::Light
+                } else {
+                    Player::Dark
+                }
+            }
         }
     }
 

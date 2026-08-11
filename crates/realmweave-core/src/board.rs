@@ -198,10 +198,13 @@ impl BoardDefinition {
     /// Content fingerprint: hash of nodes/edges/origins (not id/version).
     /// Records carry this so a future generator change that silently
     /// alters a board's content is DETECTED at replay time instead of
-    /// producing a subtly different game.
+    /// producing a subtly different game. Uses the stable FNV hasher —
+    /// this value is PERSISTED in records, and DefaultHasher's algorithm
+    /// may change across Rust releases (which would flag every archived
+    /// record as BoardDrift after a toolchain upgrade).
     pub fn fingerprint(&self) -> u64 {
         use std::hash::{Hash, Hasher};
-        let mut h = std::collections::hash_map::DefaultHasher::new();
+        let mut h = crate::rules::StableHasher::default();
         for n in &self.nodes {
             n.id.hash(&mut h);
             n.realm.hash(&mut h);

@@ -59,7 +59,7 @@ Each axis of variation has ONE authority:
 
 ## Accepted debts (reviewed, deliberate)
 
-- Positional-superko history is a `Vec::contains` linear scan
+- Situational-superko history is a `Vec::contains` linear scan
   (O(moves) per validate); measured ~µs at 250 moves. A HashSet in
   GameState would break serde/replay compatibility for zero felt gain.
 

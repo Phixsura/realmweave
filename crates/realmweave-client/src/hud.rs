@@ -8,8 +8,8 @@ use crate::layout::ViewMode;
 use crate::net;
 use crate::session::{Connection, Control, PlayerIntent, Session};
 use crate::{
-    tutorial, Active, BoardSpawned, Duel, GameSession, IntentEvent, LocalClocks, Net, NodeMarker,
-    Palette, Replay, Tutorial, UiState, ViewSettings,
+    tutorial, Active, BoardSpawned, Duel, GameSession, HudHeight, IntentEvent, LocalClocks, Net,
+    NodeMarker, Palette, Replay, Tutorial, UiState, ViewSettings,
 };
 use realmweave_core::{BoardGraph, GameResult, NodeId, Player, WinReason};
 use realmweave_protocol::ClientMessage;
@@ -18,12 +18,22 @@ use realmweave_protocol::ClientMessage;
 /// full-viewport background root that top-level panels dock into.
 /// `id` must be unique per system (it names the root's egui Id).
 pub(crate) fn root_ui(ctx: &egui::Context, id: &'static str) -> egui::Ui {
+    root_ui_below(ctx, id, 0.0)
+}
+
+/// Like [`root_ui`] but starting `top_offset` px down: each system builds
+/// its own root, so panels do NOT reserve space from each other the way
+/// context-level panels do — a full-height side panel would paint over
+/// (and steal clicks from) the top HUD bar without this.
+pub(crate) fn root_ui_below(ctx: &egui::Context, id: &'static str, top_offset: f32) -> egui::Ui {
+    let mut rect = ctx.viewport_rect();
+    rect.min.y += top_offset;
     egui::Ui::new(
         ctx.clone(),
         id.into(),
         egui::UiBuilder::new()
             .layer_id(egui::LayerId::background())
-            .max_rect(ctx.viewport_rect()),
+            .max_rect(rect),
     )
 }
 
@@ -39,11 +49,12 @@ pub(crate) fn game_hud(
     mut replay: Option<ResMut<Replay>>,
     nodes: Query<Entity, With<NodeMarker>>,
     clocks: Res<LocalClocks>,
+    mut hud_height: ResMut<HudHeight>,
 ) {
     let Ok(ctx) = egui_ctx.ctx_mut() else { return };
     let mut root = root_ui(ctx, "hud_root");
     let s = &session.0;
-    egui::Panel::top("hud").show(&mut root, |ui| {
+    let hud_response = egui::Panel::top("hud").show(&mut root, |ui| {
         ui.horizontal(|ui| {
             ui.label(egui::RichText::new("Realmweave").strong());
             ui.separator();
@@ -371,6 +382,7 @@ pub(crate) fn game_hud(
             });
         }
     });
+    hud_height.0 = hud_response.response.rect.height();
 }
 
 /// Human-readable description of a node for the hover tooltip.
@@ -440,6 +452,7 @@ pub(crate) fn tutorial_panel(
     mut commands: Commands,
     mut egui_ctx: EguiContexts,
     mut tut: ResMut<Tutorial>,
+    hud_height: Res<HudHeight>,
     session: Res<GameSession>,
     nodes: Query<Entity, With<NodeMarker>>,
     mut ui_state: ResMut<UiState>,
@@ -449,7 +462,7 @@ pub(crate) fn tutorial_panel(
     let (title, body, button) = tut.0.text(game);
     let (idx, total) = tut.0.progress();
     let Ok(ctx) = egui_ctx.ctx_mut() else { return };
-    let mut root = root_ui(ctx, "tutorial_root");
+    let mut root = root_ui_below(ctx, "tutorial_root", hud_height.0);
     egui::Panel::right("tutorial")
         .resizable(false)
         .default_size(320.0)
@@ -499,6 +512,7 @@ pub(crate) fn tutorial_panel(
 /// Game-over modal: result, per-realm outcome, and next actions. Local
 /// modes offer save/rematch; online games just surface the result.
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::unwrap_used, clippy::expect_used)] // construction-time invariants: generated boards validate (CI-gated), live games replay
 pub(crate) fn game_over_panel(
     mut commands: Commands,
     mut egui_ctx: EguiContexts,
@@ -609,6 +623,10 @@ pub(crate) fn game_over_panel(
                     let mut next = Session::hotseat_with_rules(board, pie, &rules_id);
                     next.control = control;
                     session.0 = next;
+                    // A live review cursor would render the new empty game
+                    // as "复盘中：第 k/0 手" with clicks swallowed.
+                    commands.insert_resource(ViewSettings::default());
+                    commands.insert_resource(LocalClocks::default());
                 }
                 if ui.button("返回菜单").clicked() {
                     leave_session(&mut commands, &nodes, &mut ui_state);
@@ -626,6 +644,7 @@ pub(crate) fn game_over_panel(
 pub(crate) fn history_panel(
     mut egui_ctx: EguiContexts,
     session: Res<GameSession>,
+    hud_height: Res<HudHeight>,
     mut view: ResMut<ViewSettings>,
     keys: Res<ButtonInput<KeyCode>>,
 ) {
@@ -638,7 +657,7 @@ pub(crate) fn history_panel(
     let s = &session.0;
     let total = s.game.state().move_log.len();
     let Ok(ctx) = egui_ctx.ctx_mut() else { return };
-    let mut root = root_ui(ctx, "history_root");
+    let mut root = root_ui_below(ctx, "history_root", hud_height.0);
     egui::Panel::left("history")
         .resizable(false)
         .default_size(240.0)
@@ -692,6 +711,12 @@ pub(crate) fn leave_session(
     commands.remove_resource::<BoardSpawned>();
     commands.remove_resource::<Palette>();
     commands.remove_resource::<Replay>();
+    // Per-session view state must not leak into the next game: a stale
+    // cut_mode from a scissors ruleset locks a Y-family game out of
+    // placing entirely (its toggles early-return), and a stale
+    // review_cursor renders an empty board under "复盘中".
+    commands.insert_resource(ViewSettings::default());
+    commands.insert_resource(LocalClocks::default());
     for entity in nodes {
         commands.entity(entity).despawn();
     }

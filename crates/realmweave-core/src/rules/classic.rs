@@ -202,12 +202,14 @@ impl RuleSet for WeaveRules {
             next.pending_weave = None;
         }
 
-        if Self::board_full(&next) && next.result.is_none() {
+        // A full board only ends the game when the opponent truly has no
+        // answer: Sever needs no empty node, so remaining charges keep the
+        // confirmation turn alive (severing empties a node, which also
+        // restores termination progress).
+        let opp_can_sever = state.sever_charges[player_index(mover.opponent())] > 0;
+        if Self::board_full(&next) && next.result.is_none() && !opp_can_sever {
             // No confirmation turn is possible on a full board: a standing
             // weave that the opponent can never answer wins outright.
-            // (With sever charges the opponent could still answer, but a
-            // full board with charges left is not reachable in practice and
-            // the simple rule keeps termination guaranteed.)
             if next.pending_weave == Some(mover) {
                 next.result = Some(GameResult::Win {
                     player: mover,

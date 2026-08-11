@@ -501,7 +501,11 @@ fn shape_score(game: &Game, me: Player, node: NodeId) -> f64 {
     // lines" bug).
     let is_trinity = def.origins.is_empty();
     const HEX_DIRS: [[i32; 2]; 6] = [[1, 0], [0, 1], [-1, 1], [-1, 0], [0, -1], [1, -1]];
-    const TRI_DIRS: [[i32; 2]; 6] = [[0, 1], [0, -1], [1, 0], [-1, 0], [1, 1], [-1, -1]];
+    // CYCLIC order around a node (same cycle as the pierced-board fans):
+    // adjacent-pair sums then land on true diagonals, which is what the
+    // 尖 term below assumes. A ±pair ordering makes three of the six
+    // "diagonals" degenerate self-offsets and rewards solid contact.
+    const TRI_DIRS: [[i32; 2]; 6] = [[0, -1], [-1, -1], [-1, 0], [0, 1], [1, 1], [1, 0]];
     let dirs: [[i32; 2]; 6] = if is_trinity { TRI_DIRS } else { HEX_DIRS };
     let occ_at = |a: [i32; 2]| -> bool {
         bd.axial_index()

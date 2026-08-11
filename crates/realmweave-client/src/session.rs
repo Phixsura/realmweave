@@ -62,6 +62,7 @@ impl Session {
         Self::hotseat_with_rules(board, pie_rule, realmweave_core::THREE_REALMS_V1)
     }
 
+    #[allow(clippy::unwrap_used, clippy::expect_used)] // construction-time invariants: generated boards validate (CI-gated), live games replay
     pub fn hotseat_with_rules(board: BoardGraph, pie_rule: bool, ruleset: &str) -> Self {
         let config = GameConfig::new(board.definition().id.clone())
             .with_pie_rule(pie_rule)

@@ -94,9 +94,17 @@ pub(crate) fn net_pump(
                             session.clock = Some(snap.clock);
                             session.server_result = snap.result;
                             if let Connection::Online {
-                                opponent_connected, ..
+                                connected,
+                                opponent_connected,
+                                ..
                             } = &mut session.connection
                             {
+                                // A snapshot only arrives over a live
+                                // socket — this is the reconnect success
+                                // signal. Without it auto_reconnect loops
+                                // forever and the HUD stays on "connection
+                                // lost" after every recovery.
+                                *connected = true;
                                 *opponent_connected = snap.opponent_connected;
                             }
                         }

@@ -51,7 +51,7 @@ jobs:
       - name: rustfmt
         run: cargo fmt --all --check
       - name: clippy (default features)
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets -- -D warnings
       - name: clippy (labs)
         if: runner.os == 'Linux'
         run: cargo clippy --workspace --all-targets --features realmweave-client/supplywar-lab -- -D warnings
@@ -133,7 +133,7 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
-      - run: npx -y jscpd crates --silent
+      - run: npx -y jscpd@4.0.5 crates --silent
 
   # ── Required-check aggregator (the ONLY job to mark "required") ──────────
   ci-gate:

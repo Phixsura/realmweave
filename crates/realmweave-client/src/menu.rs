@@ -15,6 +15,7 @@ use crate::{
 use realmweave_core::{boardgen, BoardGraph, Player};
 use realmweave_protocol::ClientMessage;
 
+#[allow(clippy::unwrap_used, clippy::expect_used)] // construction-time invariants: generated boards validate (CI-gated), live games replay
 pub(crate) fn menu_ui(
     mut commands: Commands,
     mut egui_ctx: EguiContexts,
@@ -287,6 +288,7 @@ pub(crate) fn menu_ui(
     });
 }
 
+#[allow(clippy::unwrap_used, clippy::expect_used)] // construction-time invariants: generated boards validate (CI-gated), live games replay
 pub(crate) fn start_hotseat(
     commands: &mut Commands,
     size: usize,
@@ -394,6 +396,7 @@ pub(crate) fn start_online_create(commands: &mut Commands, ui: &mut UiState) {
     }
 }
 
+#[allow(clippy::unwrap_used, clippy::expect_used)] // construction-time invariants: generated boards validate (CI-gated), live games replay
 pub(crate) fn start_replay(commands: &mut Commands, ui: &mut UiState, auto_seconds: f32) {
     match replay::ReplayState::load(&ui.replay_path) {
         Ok(mut state) => {
@@ -426,6 +429,7 @@ pub(crate) fn start_replay(commands: &mut Commands, ui: &mut UiState, auto_secon
     }
 }
 
+#[allow(clippy::unwrap_used, clippy::expect_used)] // construction-time invariants: generated boards validate (CI-gated), live games replay
 pub(crate) fn start_online_join(commands: &mut Commands, ui: &mut UiState) {
     let code = ui.room_code.trim().to_uppercase();
     if code.is_empty() {
@@ -450,6 +454,7 @@ pub(crate) fn start_online_join(commands: &mut Commands, ui: &mut UiState) {
 
 /// Resume a saved (possibly unfinished) game record as a live vs-AI
 /// session: the human takes whichever color is to move.
+#[allow(clippy::unwrap_used, clippy::expect_used)] // construction-time invariants: generated boards validate (CI-gated), live games replay
 pub(crate) fn resume_saved(commands: &mut Commands, ui: &mut UiState) {
     let text = match std::fs::read_to_string(&ui.replay_path) {
         Ok(t) => t,
@@ -478,7 +483,16 @@ pub(crate) fn resume_saved(commands: &mut Commands, ui: &mut UiState) {
     };
     match realmweave_core::Game::replay_record(board, &record) {
         Ok(game) => {
-            let human = game.to_move();
+            // Control::VsBot stores the human's PRE-SWAP pick and
+            // vs_bot_human() re-applies the log's Swap on top — seeding it
+            // with the current to-move color in a swapped record would
+            // double-flip and hand the human's seat to the bot at resume.
+            let to_move = game.to_move();
+            let swapped = matches!(
+                game.state().move_log.get(1),
+                Some(realmweave_core::Move::Swap)
+            );
+            let human = if swapped { to_move.opponent() } else { to_move };
             let board2 = BoardGraph::new(game.board().definition().clone()).expect("round-trip");
             let mut session = Session::hotseat_with_rules(
                 board2,

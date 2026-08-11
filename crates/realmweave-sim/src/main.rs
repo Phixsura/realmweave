@@ -170,6 +170,14 @@ fn estimate_light_winrate(game: &Game, rollouts: u32, rng: &mut StdRng) -> f64 {
                 .filter(|m| matches!(m, Move::Place(_) | Move::Sever(_)))
                 .collect();
             let Some(&mv) = placements.choose(rng) else {
+                // No placement: continue via Pass where legal; a rollout
+                // stuck with no result must score 0.5, not silently count
+                // as a Dark win (which deflated light_wr and biased every
+                // --pie batch's swap rate).
+                if sim.play(Move::Pass).is_ok() {
+                    continue;
+                }
+                light_score += 0.5;
                 break;
             };
             let _ = sim.play(mv);

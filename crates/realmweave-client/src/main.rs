@@ -74,6 +74,7 @@ fn main() {
         .init_resource::<AiBudget>()
         .init_resource::<LocalClocks>()
         .init_resource::<ViewSettings>()
+        .init_resource::<HudHeight>()
         .add_message::<IntentEvent>()
         .add_systems(Startup, (setup_camera, setup_cjk_font))
         .add_systems(
@@ -210,6 +211,11 @@ impl Default for ViewSettings {
 
 #[derive(Message)]
 struct IntentEvent(PlayerIntent);
+
+/// Measured height of the top HUD bar this frame; side-panel roots start
+/// below it (per-system egui roots don't reserve space from each other).
+#[derive(Resource, Default)]
+struct HudHeight(f32);
 
 /// Local per-side elapsed thinking time (seconds), for the HUD.
 #[derive(Resource, Default)]

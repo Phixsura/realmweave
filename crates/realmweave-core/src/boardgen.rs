@@ -293,7 +293,13 @@ pub fn generate_seeded(realm_size: usize, seed: u64) -> Option<BoardDefinition> 
             return Some(def);
         }
     }
-    generate_standard(realm_size)
+    // Uncarvable seed: fall back to the standard board, but the id MUST
+    // stay the requested seeded id — resolve("hexN-sSEED") returning a
+    // definition labeled "hexN-v1" makes every stored game on that seed
+    // fail Game::new's BoardMismatch forever.
+    let mut def = generate_standard(realm_size)?;
+    def.id = format!("hex{realm_size}-s{seed}");
+    Some(def)
 }
 
 fn try_seeded(

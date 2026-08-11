@@ -18,6 +18,7 @@ use crate::{
 use realmweave_core::{boardgen, BoardGraph, EdgeKind, NodeId, Player, Realm};
 use realmweave_protocol::ClientMessage;
 
+#[allow(clippy::unwrap_used, clippy::expect_used)] // construction-time invariants: generated boards validate (CI-gated), live games replay
 pub(crate) fn setup_camera(mut commands: Commands) {
     // RW_AUTOSTART=supplywar[:demo] launches straight into Supply War
     // (":demo" turns the autopilot on) — needs the supplywar-lab feature.
@@ -200,6 +201,7 @@ pub(crate) fn toggle_cut_mode(
 }
 
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
+#[allow(clippy::unwrap_used, clippy::expect_used)] // construction-time invariants: generated boards validate (CI-gated), live games replay
 pub(crate) fn sync_board_visuals(
     mut commands: Commands,
     session: Res<GameSession>,
@@ -647,8 +649,22 @@ pub(crate) fn handle_intents(
         let session = &mut session.0;
         match (&net.0, intent) {
             (None, intent) => {
-                // Hot-seat: the engine validates every intent.
-                session.apply_local(intent);
+                // The engine validates move LEGALITY, but only the session
+                // knows WHOSE hand is on the mouse: without this gate a
+                // click during "AI 思考中…" places a stone AS THE AI (and
+                // the in-flight search result is then discarded as stale),
+                // an Observer can mutate a replay, and a spectator can
+                // corrupt a bot duel. Undo stays allowed off-turn (taking
+                // back the exchange while the AI thinks is legitimate).
+                let acting_allowed = match intent {
+                    PlayerIntent::Undo => {
+                        !matches!(session.control, Control::Observer | Control::BotDuel)
+                    }
+                    _ => session.is_my_turn(),
+                };
+                if acting_allowed {
+                    session.apply_local(intent);
+                }
             }
             (Some(handle), PlayerIntent::PlaceStone(node)) => {
                 if session.is_my_turn() {

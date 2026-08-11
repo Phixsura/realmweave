@@ -5,7 +5,9 @@
 //!
 //!   1. Place a stone on any empty node (pie swap available to Dark).
 //!      DEATH: a group with no liberties is captured; suicide illegal;
-//!      recreating a previous position illegal (positional superko).
+//!      recreating a previous position with the same player to move
+//!      illegal (SITUATIONAL superko — the deliberate choice recorded in
+//!      docs/design-triforce-v5.md §4; hashes include to_move).
 //!   2. WEAVE: connect all three sides of the great triangle with one
 //!      group. First weave wins. The Y theorem guarantees exactly one
 //!      player can ever do this on a full board — no draws, and blocking

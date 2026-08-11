@@ -54,8 +54,8 @@ cargo test --workspace
 # validate the shipped boards
 cargo run -p realmweave-cli -- validate boards/*.json
 
-# play a local two-player game in the terminal (supply rules by default)
-cargo run -p realmweave-cli -- play --board boards/hex91-v1.json
+# play a local two-player game in the terminal (flagship 织心 rules)
+cargo run -p realmweave-cli -- play --board boards/tf22-v5.json --ruleset triforce-v5
 # blitz mode (classic weave race)
 cargo run -p realmweave-cli -- play --board boards/hex37-v1.json --ruleset three-realms-v1
 

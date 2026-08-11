@@ -82,7 +82,13 @@ pub fn spawn_room_reaper(state: Shared) {
                     }
                 }
                 let idle = room.last_activity.elapsed() > GRACE;
-                let reapable = room.finished || !room.started;
+                // Untimed live games have no flag-fall, so with both seats
+                // gone they would otherwise be unreapable forever — a
+                // trivially mintable permanent memory leak. Abandonment
+                // (both disconnected past the grace period) reaps them too;
+                // reconnect tokens die with the room, which is the same
+                // contract as a finished room.
+                let reapable = room.finished || !room.started || room.time_control.is_none();
                 if reapable && room.fully_disconnected() && idle {
                     doomed.push(code.clone());
                 }
@@ -240,18 +246,28 @@ async fn handle_socket(state: Shared, socket: WebSocket) {
         }
     }
 
-    // Disconnect: mark the seat as away and notify the opponent.
+    // Disconnect: mark the seat as away and notify the opponent. Compare
+    // channel IDENTITY, not just the token: a half-dead socket's teardown
+    // can fire after the same player already reconnected on a new socket,
+    // and clearing the fresh channel would silently disconnect the live
+    // connection (every broadcast dropped until the next reconnect).
     if let Some(Session { room, token }) = session {
         let mut room = room.lock().await;
         room.last_activity = std::time::Instant::now();
         if let Some(seat) = room.seat_of_token(&token) {
-            if let Some(s) = room.seat_mut(seat) {
-                s.tx = None;
+            let is_this_connection = room
+                .seat_mut(seat)
+                .and_then(|s| s.tx.as_ref())
+                .is_some_and(|t| t.same_channel(&tx));
+            if is_this_connection {
+                if let Some(s) = room.seat_mut(seat) {
+                    s.tx = None;
+                }
+                room.send_to(
+                    seat.opponent(),
+                    ServerMessage::OpponentConnection { connected: false },
+                );
             }
-            room.send_to(
-                seat.opponent(),
-                ServerMessage::OpponentConnection { connected: false },
-            );
         }
     }
     writer.abort();
@@ -299,24 +315,24 @@ async fn handle_message(
                     return;
                 }
             };
-            let room_id = {
-                let rooms = state.rooms.lock().await;
+            let game_id = uuid::Uuid::new_v4().to_string();
+            let token = uuid::Uuid::new_v4().to_string();
+            // Uniqueness check and insert under ONE lock acquisition:
+            // releasing between them lets two concurrent creates pick the
+            // same code, and HashMap::insert would silently replace the
+            // first room (orphaning it — joinable by nobody).
+            let (room_id, room) = {
+                let mut rooms = state.rooms.lock().await;
                 let mut code = room_code();
                 while rooms.contains_key(&code) {
                     code = room_code();
                 }
-                code
+                let mut room = Room::new(code.clone(), game_id.clone(), game, token.clone());
+                room.light.tx = Some(unbounded_to(tx));
+                let room = Arc::new(Mutex::new(room));
+                rooms.insert(code.clone(), room.clone());
+                (code, room)
             };
-            let game_id = uuid::Uuid::new_v4().to_string();
-            let token = uuid::Uuid::new_v4().to_string();
-            let mut room = Room::new(room_id.clone(), game_id.clone(), game, token.clone());
-            room.light.tx = Some(unbounded_to(tx));
-            let room = Arc::new(Mutex::new(room));
-            state
-                .rooms
-                .lock()
-                .await
-                .insert(room_id.clone(), room.clone());
             if let Err(e) = state.store.create_game(&game_id, &config).await {
                 tracing::error!("persist create_game: {e}");
             }
