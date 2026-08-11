@@ -1,0 +1,36 @@
+# Complexity-gate ratchet (lizard -C 15 -T nloc=100). These functions
+# exceeded the thresholds when the gate was introduced (2026-08-11) and
+# are grandfathered — the gate stops NEW complexity, the list only
+# shrinks. Format: path:function.
+crates/realmweave-bot/src/lib.rs:candidates
+crates/realmweave-bot/src/lib.rs:choose_move_with_budget
+crates/realmweave-bot/src/lib.rs:trinity_cost
+crates/realmweave-bot/src/mcts.rs:playout
+crates/realmweave-cli/src/main.rs:run
+crates/realmweave-client/src/board_view.rs:sync_board_visuals
+crates/realmweave-client/src/bots_ui.rs:duel_turn
+crates/realmweave-client/src/hud.rs:game_hud
+crates/realmweave-client/src/hud.rs:game_over_panel
+crates/realmweave-client/src/menu.rs:menu_ui
+crates/realmweave-client/src/netsync.rs:net_pump
+crates/realmweave-client/src/supplywar_ui.rs:autopilot
+crates/realmweave-client/src/supplywar_ui.rs:sw_hud
+crates/realmweave-client/src/supplywar_ui.rs:sw_setup_scene
+crates/realmweave-client/src/supplywar_ui.rs:sw_sync_visuals
+crates/realmweave-core/examples/triforce_deathprobe.rs:main
+crates/realmweave-core/examples/triforce_gradient.rs:playout
+crates/realmweave-core/examples/triforce_probe.rs:main
+crates/realmweave-core/src/boardgen.rs:pierced_orbit
+crates/realmweave-core/src/boardgen.rs:try_seeded
+crates/realmweave-core/src/rules/shared.rs:vertex_disjoint_routes
+crates/realmweave-core/src/rules/weave_sever.rs:apply_move
+crates/realmweave-core/src/rules/weave_sever.rs:petrify_weave
+crates/realmweave-core/src/rules/weave_sever.rs:validate_move
+crates/realmweave-core/src/validate.rs:validate_board
+crates/realmweave-server/src/lib.rs:handle_message
+crates/realmweave-sim/src/center.rs:report
+crates/realmweave-sim/src/main.rs:run
+crates/realmweave-sim/src/main.rs:run_batch
+crates/realmweave-supplywar/src/field.rs:apply
+crates/realmweave-supplywar/src/field.rs:tick
+crates/realmweave-supplywar/src/map.rs:try_generate

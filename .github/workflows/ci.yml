@@ -106,9 +106,36 @@ jobs:
         with:
           command: check advisories licenses
 
+  # ── lizard: complexity gate (CCN > 15 or NLOC > 100 fails) ───────────────
+  # whitelizard.txt grandfathers the functions that predate the gate; the
+  # list only shrinks. New/edited functions must stay under the thresholds.
+  lizard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.13"
+      - run: pip install lizard==1.23.0
+      - run: lizard crates -l rust -C 15 -T nloc=100 --warnings_only -W whitelizard.txt
+
+  # ── jscpd: code duplication gate (config in .jscpd.json) ─────────────────
+  jscpd:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22
+      - run: npx -y jscpd crates --silent
+
   # ── Required-check aggregator (the ONLY job to mark "required") ──────────
   ci-gate:
-    needs: [check, release-build, deny]
+    needs: [check, release-build, deny, lizard, jscpd]
     if: always()
     runs-on: ubuntu-latest
     steps:
