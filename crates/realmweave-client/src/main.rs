@@ -51,20 +51,30 @@ fn main() {
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
                 title: "Realmweave".to_string(),
-                resolution: (1280.0f32, 800.0f32).into(),
+                resolution: (1280u32, 800u32).into(),
                 ..default()
             }),
             ..default()
         }))
         .add_plugins(MeshPickingPlugin)
-        .add_plugins(EguiPlugin)
+        .add_plugins({
+            // Single-pass: our egui systems live in the one Update chain
+            // (interleaved with game systems); multipass would force them
+            // into EguiPrimaryContextPass and split that chain. The field
+            // is deprecated upstream — revisit when bevy_egui removes it.
+            #[allow(deprecated)]
+            EguiPlugin {
+                enable_multipass_for_primary_context: false,
+                ..default()
+            }
+        })
         .add_plugins(steam::SteamPlugin)
         .add_plugins(maybe_supplywar_plugin())
         .init_resource::<UiState>()
         .init_resource::<AiBudget>()
         .init_resource::<LocalClocks>()
         .init_resource::<ViewSettings>()
-        .add_event::<IntentEvent>()
+        .add_message::<IntentEvent>()
         .add_systems(Startup, (setup_camera, setup_cjk_font))
         .add_systems(
             Update,
@@ -90,7 +100,7 @@ fn main() {
                     duel_panel.run_if(resource_exists::<Duel>),
                 )
                     .chain()
-                    .run_if(resource_exists::<Active>.and(resource_exists::<GameSession>)),
+                    .run_if(resource_exists::<Active>.and_then(resource_exists::<GameSession>)),
             ),
         )
         .run();
@@ -198,7 +208,7 @@ impl Default for ViewSettings {
     }
 }
 
-#[derive(Event)]
+#[derive(Message)]
 struct IntentEvent(PlayerIntent);
 
 /// Local per-side elapsed thinking time (seconds), for the HUD.
@@ -368,11 +378,11 @@ fn setup_cjk_font(mut egui_ctx: EguiContexts) {
     ];
     for path in CANDIDATES {
         if let Ok(bytes) = std::fs::read(path) {
-            let ctx = egui_ctx.ctx_mut();
+            let Ok(ctx) = egui_ctx.ctx_mut() else { return };
             let mut fonts = egui::FontDefinitions::default();
             fonts
                 .font_data
-                .insert("cjk".to_owned(), egui::FontData::from_owned(bytes));
+                .insert("cjk".to_owned(), egui::FontData::from_owned(bytes).into());
             for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
                 fonts
                     .families

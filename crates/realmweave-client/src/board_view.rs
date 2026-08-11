@@ -84,14 +84,14 @@ pub(crate) fn setup_camera(mut commands: Commands) {
     commands.spawn((
         DirectionalLight {
             illuminance: 12_000.0,
-            shadows_enabled: false,
             ..default()
         },
         Transform::from_xyz(8.0, 16.0, 8.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
-    commands.insert_resource(AmbientLight {
+    commands.insert_resource(GlobalAmbientLight {
         color: Color::WHITE,
         brightness: 400.0,
+        ..default()
     });
     commands.insert_resource(ClearColor(Color::srgb(0.02, 0.02, 0.06)));
 }
@@ -99,12 +99,15 @@ pub(crate) fn setup_camera(mut commands: Commands) {
 pub(crate) fn orbit_camera(
     mut query: Query<(&mut OrbitCamera, &mut Transform)>,
     buttons: Res<ButtonInput<MouseButton>>,
-    mut motion: EventReader<MouseMotion>,
-    mut wheel: EventReader<MouseWheel>,
+    mut motion: MessageReader<MouseMotion>,
+    mut wheel: MessageReader<MouseWheel>,
     mut egui_ctx: EguiContexts,
 ) {
-    let over_ui = egui_ctx.ctx_mut().wants_pointer_input();
-    let Ok((mut orbit, mut transform)) = query.get_single_mut() else {
+    let over_ui = egui_ctx
+        .ctx_mut()
+        .map(|c| c.egui_wants_pointer_input())
+        .unwrap_or(false);
+    let Ok((mut orbit, mut transform)) = query.single_mut() else {
         return;
     };
     let mut rotate = Vec2::ZERO;
@@ -151,7 +154,7 @@ pub(crate) fn shortcuts(
     keys: Res<ButtonInput<KeyCode>>,
     session: Option<Res<GameSession>>,
     mut view: ResMut<ViewSettings>,
-    mut events: EventWriter<IntentEvent>,
+    mut events: MessageWriter<IntentEvent>,
 ) {
     let Some(session) = session else { return };
     let s = &session.0;
@@ -162,7 +165,7 @@ pub(crate) fn shortcuts(
         && total > 0
     {
         view.review_cursor = None;
-        events.send(IntentEvent(PlayerIntent::Undo));
+        events.write(IntentEvent(PlayerIntent::Undo));
     }
     // Arrow keys drive the review cursor (opens the history panel too).
     if total > 0 && keys.just_pressed(KeyCode::ArrowLeft) {
@@ -267,8 +270,8 @@ pub(crate) fn sync_board_visuals(
                     NodeMarker(id),
                 ))
                 .observe(
-                    move |_trigger: Trigger<Pointer<Click>>,
-                          mut events: EventWriter<IntentEvent>,
+                    move |_trigger: On<Pointer<Click>>,
+                          mut events: MessageWriter<IntentEvent>,
                           mut view: ResMut<ViewSettings>,
                           session: Res<GameSession>| {
                         let s = &session.0;
@@ -285,7 +288,7 @@ pub(crate) fn sync_board_visuals(
                                     if let Some(e) = def.edges.iter().position(|e| {
                                         (e.a == anchor && e.b == id) || (e.a == id && e.b == anchor)
                                     }) {
-                                        events.send(IntentEvent(PlayerIntent::CutEdge(e as u32)));
+                                        events.write(IntentEvent(PlayerIntent::CutEdge(e as u32)));
                                         view.cut_anchor = None;
                                     } else {
                                         // Not adjacent: restart from here.
@@ -301,16 +304,16 @@ pub(crate) fn sync_board_visuals(
                             Some(p) if p != me => PlayerIntent::SeverStone(id),
                             _ => PlayerIntent::PlaceStone(id),
                         };
-                        events.send(IntentEvent(intent));
+                        events.write(IntentEvent(intent));
                     },
                 )
                 .observe(
-                    move |_trigger: Trigger<Pointer<Over>>, mut view: ResMut<ViewSettings>| {
+                    move |_trigger: On<Pointer<Over>>, mut view: ResMut<ViewSettings>| {
                         view.hovered = Some(id);
                     },
                 )
                 .observe(
-                    move |_trigger: Trigger<Pointer<Out>>, mut view: ResMut<ViewSettings>| {
+                    move |_trigger: On<Pointer<Out>>, mut view: ResMut<ViewSettings>| {
                         if view.hovered == Some(id) {
                             view.hovered = None;
                         }
@@ -636,7 +639,7 @@ pub(crate) fn node_material(color: Color, emissive_strength: f32) -> StandardMat
 // ------------------------------------------------------------------ intents
 
 pub(crate) fn handle_intents(
-    mut events: EventReader<IntentEvent>,
+    mut events: MessageReader<IntentEvent>,
     mut session: ResMut<GameSession>,
     net: Res<Net>,
 ) {

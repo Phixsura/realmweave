@@ -13,7 +13,7 @@ pub struct SupplyWarPlugin;
 
 impl Plugin for SupplyWarPlugin {
     fn build(&self, app: &mut App) {
-        app.add_event::<SwCommand>()
+        app.add_message::<SwCommand>()
             .insert_resource(Time::<Fixed>::from_hz(field::TICKS_PER_SEC as f64))
             .add_systems(FixedUpdate, sw_tick.run_if(resource_exists::<SwSession>))
             .add_systems(
@@ -52,7 +52,7 @@ impl SwSession {
     }
 }
 
-#[derive(Event)]
+#[derive(Message)]
 struct SwCommand(Command);
 
 #[derive(Resource)]
@@ -98,7 +98,7 @@ fn edge_transform(map: &SupplyMap, edge: u32) -> Transform {
 
 // ----------------------------------------------------------------- tick ---
 
-fn sw_tick(mut session: ResMut<SwSession>, mut events: EventReader<SwCommand>) {
+fn sw_tick(mut session: ResMut<SwSession>, mut events: MessageReader<SwCommand>) {
     for SwCommand(cmd) in events.read() {
         session.pending.push(*cmd);
     }
@@ -260,10 +260,10 @@ fn sw_setup_scene(
                 SwNode(nid),
             ))
             .observe(
-                move |trigger: Trigger<Pointer<Click>>, mut events: EventWriter<SwCommand>| {
+                move |trigger: On<Pointer<Click>>, mut events: MessageWriter<SwCommand>| {
                     // Right-click (or secondary) = discharge at this node.
                     if trigger.button == PointerButton::Secondary {
-                        events.send(SwCommand(Command::Discharge(id)));
+                        events.write(SwCommand(Command::Discharge(id)));
                     }
                 },
             );
@@ -278,8 +278,8 @@ fn sw_setup_scene(
                 SwEdge,
             ))
             .observe(
-                move |trigger: Trigger<Pointer<Click>>,
-                      mut events: EventWriter<SwCommand>,
+                move |trigger: On<Pointer<Click>>,
+                      mut events: MessageWriter<SwCommand>,
                       session: Res<SwSession>| {
                     if trigger.button != PointerButton::Primary {
                         return;
@@ -289,7 +289,7 @@ fn sw_setup_scene(
                         LinkState::Single => Command::Reinforce(id),
                         _ => return,
                     };
-                    events.send(SwCommand(cmd));
+                    events.write(SwCommand(cmd));
                 },
             );
     }
@@ -316,7 +316,7 @@ fn sw_sync_visuals(
         if *nid == map.core {
             continue;
         }
-        let mat = materials.get_mut(&assets.node_mats[i]).unwrap();
+        let mut mat = materials.get_mut(&assets.node_mats[i]).unwrap();
         let v = s.void[i];
         let l = s.light[i];
         let refr = s.refractory[i];
@@ -366,7 +366,7 @@ fn sw_sync_visuals(
 
     // Edge materials: link state + hp.
     for e in 0..map.edges.len() {
-        let mat = materials.get_mut(&assets.edge_mats[e]).unwrap();
+        let mut mat = materials.get_mut(&assets.edge_mats[e]).unwrap();
         match s.links[e] {
             LinkState::Empty => {
                 mat.base_color = Color::srgba(0.5, 0.5, 0.7, 0.08);
@@ -429,11 +429,11 @@ fn sw_sync_visuals(
 fn sw_camera(
     mut query: Query<&mut Transform, With<Camera3d>>,
     keys: Res<ButtonInput<KeyCode>>,
-    mut wheel: EventReader<MouseWheel>,
+    mut wheel: MessageReader<MouseWheel>,
     time: Res<Time>,
     mut zoom: Local<f32>,
 ) {
-    let Ok(mut tf) = query.get_single_mut() else {
+    let Ok(mut tf) = query.single_mut() else {
         return;
     };
     if *zoom == 0.0 {
@@ -472,7 +472,7 @@ fn sw_hud(
     nodes: Query<Entity, With<SwNode>>,
     edges: Query<Entity, With<SwEdge>>,
 ) {
-    let ctx = egui_ctx.ctx_mut();
+    let Ok(ctx) = egui_ctx.ctx_mut() else { return };
     let mut toggle_pause = false;
     let mut toggle_ap = false;
     let mut restart_seed: Option<u64> = None;
@@ -485,7 +485,8 @@ fn sw_hud(
         let paused = session_ref.paused;
         let autopilot = session_ref.autopilot;
 
-        egui::TopBottomPanel::top("sw_hud").show(ctx, |ui| {
+        let mut root = crate::hud::root_ui(ctx, "sw_hud_root");
+        egui::Panel::top("sw_hud").show(&mut root, |ui| {
         ui.horizontal(|ui| {
             ui.label(egui::RichText::new("Supply War · 虚空场").strong());
             ui.separator();
@@ -548,9 +549,10 @@ fn sw_hud(
         });
     });
         if let Some(outcome) = s.outcome {
+            let mut root = crate::hud::root_ui(ctx, "sw_outcome_root");
             egui::CentralPanel::default()
-                .frame(egui::Frame::none().fill(egui::Color32::from_black_alpha(160)))
-                .show(ctx, |ui| {
+                .frame(egui::Frame::new().fill(egui::Color32::from_black_alpha(160)))
+                .show(&mut root, |ui| {
                     ui.vertical_centered(|ui| {
                         ui.add_space(120.0);
                         let (title, color) = match outcome {

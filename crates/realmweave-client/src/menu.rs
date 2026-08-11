@@ -20,7 +20,7 @@ pub(crate) fn menu_ui(
     mut egui_ctx: EguiContexts,
     mut ui_state: ResMut<UiState>,
 ) {
-    let ctx = egui_ctx.ctx_mut();
+    let Ok(ctx) = egui_ctx.ctx_mut() else { return };
     // F1: launch Supply War with the demo AI at the wheel (lab feature).
     #[cfg(feature = "supplywar-lab")]
     if ctx.input(|i| i.key_pressed(egui::Key::F1)) {
@@ -30,7 +30,8 @@ pub(crate) fn menu_ui(
         commands.insert_resource(Active);
         return;
     }
-    egui::CentralPanel::default().show(ctx, |ui| {
+    let mut root = crate::hud::root_ui(ctx, "menu_root");
+    egui::CentralPanel::default().show(&mut root, |ui| {
         ui.vertical_centered(|ui| {
             ui.add_space(60.0);
             ui.heading(egui::RichText::new("REALMWEAVE").size(42.0));

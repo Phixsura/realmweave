@@ -439,11 +439,12 @@ pub(crate) fn win_reason_name(reason: WinReason) -> &'static str {
 
 /// Duel commentary panel: shows the exhibition's rolling narration.
 pub(crate) fn duel_panel(mut egui_ctx: EguiContexts, duel: Res<Duel>, session: Res<GameSession>) {
-    let ctx = egui_ctx.ctx_mut();
-    egui::SidePanel::right("duel")
+    let Ok(ctx) = egui_ctx.ctx_mut() else { return };
+    let mut root = crate::hud::root_ui(ctx, "duel_root");
+    egui::Panel::right("duel")
         .resizable(false)
-        .default_width(360.0)
-        .show(ctx, |ui| {
+        .default_size(360.0)
+        .show(&mut root, |ui| {
             ui.add_space(8.0);
             ui.heading(format!(
                 "AI 对弈 · 第 {}/{} 局 · 第 {} 手",

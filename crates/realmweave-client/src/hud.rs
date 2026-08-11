@@ -14,22 +14,36 @@ use crate::{
 use realmweave_core::{BoardGraph, GameResult, NodeId, Player, WinReason};
 use realmweave_protocol::ClientMessage;
 
+/// egui 0.35 panels attach to a `Ui`, not a `Context` — build the
+/// full-viewport background root that top-level panels dock into.
+/// `id` must be unique per system (it names the root's egui Id).
+pub(crate) fn root_ui(ctx: &egui::Context, id: &'static str) -> egui::Ui {
+    egui::Ui::new(
+        ctx.clone(),
+        id.into(),
+        egui::UiBuilder::new()
+            .layer_id(egui::LayerId::background())
+            .max_rect(ctx.viewport_rect()),
+    )
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn game_hud(
     mut commands: Commands,
     mut egui_ctx: EguiContexts,
     session: Res<GameSession>,
     mut view: ResMut<ViewSettings>,
-    mut events: EventWriter<IntentEvent>,
+    mut events: MessageWriter<IntentEvent>,
     mut ui_state: ResMut<UiState>,
     net: Res<Net>,
     mut replay: Option<ResMut<Replay>>,
     nodes: Query<Entity, With<NodeMarker>>,
     clocks: Res<LocalClocks>,
 ) {
-    let ctx = egui_ctx.ctx_mut();
+    let Ok(ctx) = egui_ctx.ctx_mut() else { return };
+    let mut root = root_ui(ctx, "hud_root");
     let s = &session.0;
-    egui::TopBottomPanel::top("hud").show(ctx, |ui| {
+    egui::Panel::top("hud").show(&mut root, |ui| {
         ui.horizontal(|ui| {
             ui.label(egui::RichText::new("Realmweave").strong());
             ui.separator();
@@ -102,7 +116,7 @@ pub(crate) fn game_hud(
             let observing = matches!(s.control, Control::Observer);
             if !observing {
                 if s.swap_available() && ui.button("swap sides (pie)").clicked() {
-                    events.send(IntentEvent(PlayerIntent::Swap));
+                    events.write(IntentEvent(PlayerIntent::Swap));
                 }
                 // Pass availability is a ruleset capability, NOT an
                 // enumeration of every legal move each frame.
@@ -110,10 +124,10 @@ pub(crate) fn game_hud(
                     && s.game.rules().allows_pass()
                     && ui.button("pass").clicked()
                 {
-                    events.send(IntentEvent(PlayerIntent::Pass));
+                    events.write(IntentEvent(PlayerIntent::Pass));
                 }
                 if s.result().is_none() && ui.button("resign").clicked() {
-                    events.send(IntentEvent(PlayerIntent::Resign));
+                    events.write(IntentEvent(PlayerIntent::Resign));
                 }
                 // Local undo: hot-seat takes back one move; vs-AI takes back
                 // the human's move AND the AI's reply. Never online.
@@ -123,7 +137,7 @@ pub(crate) fn game_hud(
                 let undo_clicked = local_live && ui.button("↩ 悔棋 (U)").clicked();
                 if undo_clicked {
                     view.review_cursor = None;
-                    events.send(IntentEvent(PlayerIntent::Undo));
+                    events.write(IntentEvent(PlayerIntent::Undo));
                 }
             }
             let charges = s.game.state().sever_charges;
@@ -434,11 +448,12 @@ pub(crate) fn tutorial_panel(
     tut.0.advance(game);
     let (title, body, button) = tut.0.text(game);
     let (idx, total) = tut.0.progress();
-    let ctx = egui_ctx.ctx_mut();
-    egui::SidePanel::right("tutorial")
+    let Ok(ctx) = egui_ctx.ctx_mut() else { return };
+    let mut root = root_ui(ctx, "tutorial_root");
+    egui::Panel::right("tutorial")
         .resizable(false)
-        .default_width(320.0)
-        .show(ctx, |ui| {
+        .default_size(320.0)
+        .show(&mut root, |ui| {
             ui.add_space(8.0);
             ui.horizontal(|ui| {
                 ui.heading(title);
@@ -502,7 +517,7 @@ pub(crate) fn game_over_panel(
     };
     let is_local = matches!(session.0.connection, Connection::Local);
     let ruleset = session.0.game.config().ruleset_id.clone();
-    let ctx = egui_ctx.ctx_mut();
+    let Ok(ctx) = egui_ctx.ctx_mut() else { return };
     egui::Window::new("对局结束")
         .collapsible(false)
         .resizable(false)
@@ -622,11 +637,12 @@ pub(crate) fn history_panel(
     }
     let s = &session.0;
     let total = s.game.state().move_log.len();
-    let ctx = egui_ctx.ctx_mut();
-    egui::SidePanel::left("history")
+    let Ok(ctx) = egui_ctx.ctx_mut() else { return };
+    let mut root = root_ui(ctx, "history_root");
+    egui::Panel::left("history")
         .resizable(false)
-        .default_width(240.0)
-        .show(ctx, |ui| {
+        .default_size(240.0)
+        .show(&mut root, |ui| {
             ui.add_space(6.0);
             ui.horizontal(|ui| {
                 ui.heading("棋谱");
